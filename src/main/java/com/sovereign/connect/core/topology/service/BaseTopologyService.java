@@ -4,11 +4,16 @@ import com.sovereign.connect.core.topology.event.TopologyChangeKind;
 import com.sovereign.connect.core.topology.event.TopologyChanged;
 import com.sovereign.connect.core.topology.model.CapabilityNode;
 import com.sovereign.connect.core.topology.model.DeviceNode;
+import com.sovereign.connect.core.topology.model.EndpointHealth;
 import com.sovereign.connect.core.topology.model.EndpointNode;
 import com.sovereign.connect.core.topology.model.HabitatBaseTopology;
+import com.sovereign.connect.core.topology.model.HealthStatus;
 import com.sovereign.connect.core.topology.model.RoomNode;
+import com.sovereign.connect.core.topology.model.TargetValidationResult;
 import com.sovereign.connect.core.topology.model.TopologyMetadata;
+import com.sovereign.connect.core.topology.model.TopologyMutationResult;
 import com.sovereign.connect.core.topology.model.TopologyNode;
+import com.sovereign.connect.core.topology.model.TopologyTargetRef;
 import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.model.ZoneNode;
 import com.sovereign.connect.core.topology.port.BaseTopologyRepository;
@@ -18,10 +23,13 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 public class BaseTopologyService {
 
@@ -31,6 +39,7 @@ public class BaseTopologyService {
     private final BaseTopologyRepository repository;
     private final Clock clock;
     private final List<TopologyChanged> emittedEvents = new ArrayList<>();
+    private final ConcurrentMap<String, Map<String, Object>> deviceStates = new ConcurrentHashMap<>();
 
     public BaseTopologyService(BaseTopologyRepository repository) {
         this(repository, Clock.systemUTC());
@@ -111,6 +120,81 @@ public class BaseTopologyService {
         return mutated;
     }
 
+    public TopologyMutationResult addEndpointWithResult(String habitatId, EndpointNode endpoint) {
+        TopologyVersion fromVersion = repository.findCurrentVersion(habitatId)
+            .orElseThrow(() -> new IllegalArgumentException("base topology does not exist for habitatId " + habitatId));
+        HabitatBaseTopology mutated = addEndpoint(habitatId, endpoint);
+        return new TopologyMutationResult(
+            habitatId,
+            fromVersion,
+            mutated.topologyVersion(),
+            Set.of(TopologyChangeKind.ENDPOINT_ADDED),
+            List.of(endpoint.deviceId()),
+            List.of(endpoint.endpointId())
+        );
+    }
+
+    public void updateEndpointHealth(String habitatId, String endpointId, HealthStatus status) {
+        Objects.requireNonNull(status, "status is required");
+        HabitatBaseTopology current = repository.findByHabitatId(habitatId)
+            .orElseThrow(() -> new IllegalArgumentException("base topology does not exist for habitatId " + habitatId));
+        if (current.endpoints().stream().noneMatch(endpoint -> endpoint.endpointId().equals(endpointId))) {
+            throw new IllegalArgumentException("endpointId does not exist in habitat topology: " + endpointId);
+        }
+
+        List<EndpointNode> endpoints = current.endpoints().stream()
+            .map(endpoint -> endpoint.endpointId().equals(endpointId) ? withHealth(endpoint, status) : endpoint)
+            .toList();
+        repository.save(new HabitatBaseTopology(
+            current.habitatId(),
+            current.topologyVersion(),
+            current.rooms(),
+            current.zones(),
+            current.devices(),
+            endpoints,
+            current.metadata()
+        ));
+    }
+
+    public void updateDeviceState(String habitatId, String deviceId, Map<String, Object> state) {
+        Objects.requireNonNull(state, "state is required");
+        HabitatBaseTopology current = repository.findByHabitatId(habitatId)
+            .orElseThrow(() -> new IllegalArgumentException("base topology does not exist for habitatId " + habitatId));
+        if (current.devices().stream().noneMatch(device -> device.deviceId().equals(deviceId))) {
+            throw new IllegalArgumentException("deviceId does not exist in habitat topology: " + deviceId);
+        }
+        deviceStates.put(deviceStateKey(habitatId, deviceId), Map.copyOf(state));
+    }
+
+    public Optional<Map<String, Object>> findDeviceState(String habitatId, String deviceId) {
+        return Optional.ofNullable(deviceStates.get(deviceStateKey(habitatId, deviceId)));
+    }
+
+    public TargetValidationResult validateTarget(
+        String habitatId,
+        TopologyTargetRef target,
+        TopologyVersion requestTopologyVersion
+    ) {
+        Objects.requireNonNull(target, "target is required");
+        Objects.requireNonNull(requestTopologyVersion, "requestTopologyVersion is required");
+        HabitatBaseTopology current = repository.findByHabitatId(habitatId)
+            .orElseThrow(() -> new IllegalArgumentException("base topology does not exist for habitatId " + habitatId));
+        if (!requestTopologyVersion.isScopedToHabitat(habitatId)) {
+            return TargetValidationResult.TOPOLOGY_VERSION_CONFLICT;
+        }
+
+        TargetValidationResult targetResult = validateCurrentTarget(current, target);
+        boolean sameVersion = current.topologyVersion().equals(requestTopologyVersion);
+        if (sameVersion) {
+            return targetResult == TargetValidationResult.VALID
+                ? TargetValidationResult.VALID
+                : targetResult;
+        }
+        return targetResult == TargetValidationResult.VALID
+            ? TargetValidationResult.VALID_AFTER_REVALIDATION
+            : targetResult;
+    }
+
     public Optional<TopologyVersion> findCurrentVersion(String habitatId) {
         return repository.findCurrentVersion(habitatId);
     }
@@ -154,6 +238,48 @@ public class BaseTopologyService {
 
     private TopologyMetadata metadataNow() {
         return new TopologyMetadata(SCHEMA_VERSION, Instant.now(clock), SOURCE, null);
+    }
+
+    private EndpointNode withHealth(EndpointNode endpoint, HealthStatus status) {
+        EndpointHealth currentHealth = endpoint.health();
+        EndpointHealth health = new EndpointHealth(status, Instant.now(clock), currentHealth.details());
+        return new EndpointNode(
+            endpoint.endpointId(),
+            endpoint.deviceId(),
+            endpoint.alias(),
+            endpoint.displayName(),
+            endpoint.kind(),
+            endpoint.roomId(),
+            endpoint.zoneId(),
+            endpoint.capabilities(),
+            endpoint.traits(),
+            health,
+            endpoint.providerRef(),
+            endpoint.metadata()
+        );
+    }
+
+    private TargetValidationResult validateCurrentTarget(HabitatBaseTopology topology, TopologyTargetRef target) {
+        Optional<DeviceNode> device = topology.devices().stream()
+            .filter(candidate -> candidate.deviceId().equals(target.deviceId()))
+            .findFirst();
+        if (device.isEmpty()) {
+            return TargetValidationResult.TARGET_NOT_FOUND;
+        }
+        Optional<EndpointNode> endpoint = topology.endpoints().stream()
+            .filter(candidate -> candidate.endpointId().equals(target.endpointId()))
+            .filter(candidate -> candidate.deviceId().equals(target.deviceId()))
+            .findFirst();
+        if (endpoint.isEmpty() || !device.get().endpointIds().contains(target.endpointId())) {
+            return TargetValidationResult.TARGET_NOT_FOUND;
+        }
+        boolean capabilityExists = endpoint.get().capabilities().stream()
+            .anyMatch(capability -> capability.capabilityId().equals(target.capabilityId()));
+        return capabilityExists ? TargetValidationResult.VALID : TargetValidationResult.CAPABILITY_MISMATCH;
+    }
+
+    private String deviceStateKey(String habitatId, String deviceId) {
+        return habitatId + ":" + deviceId;
     }
 
     private RoomNode appendEndpoint(RoomNode room, String endpointId) {
