@@ -12,6 +12,7 @@ import com.sovereign.connect.core.topology.model.HealthStatus;
 import com.sovereign.connect.core.topology.model.TopologyMutationRecord;
 import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.port.BaseTopologyRepository;
+import com.sovereign.connect.core.topology.port.CoreSnapshotReadPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
@@ -30,7 +31,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-public class H2BaseTopologyRepository implements BaseTopologyRepository {
+public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSnapshotReadPort {
 
     private static final TypeReference<Map<String, Object>> STATE_TYPE = new TypeReference<>() {
     };
@@ -79,6 +80,11 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository {
             habitatId
         );
         return results.stream().findFirst();
+    }
+
+    @Override
+    public Optional<HabitatBaseTopology> findTopology(String habitatId) {
+        return findByHabitatId(habitatId);
     }
 
     @Override
