@@ -134,6 +134,115 @@ public class BaseTopologyService {
         );
     }
 
+    public TopologyMutationResult addDeviceWithResult(String habitatId, DeviceNode device) {
+        Objects.requireNonNull(device, "device is required");
+        HabitatBaseTopology current = repository.findByHabitatId(habitatId)
+            .orElseThrow(() -> new IllegalArgumentException("base topology does not exist for habitatId " + habitatId));
+        if (current.devices().stream().anyMatch(existing -> existing.deviceId().equals(device.deviceId()))) {
+            throw new IllegalArgumentException("deviceId already exists in habitat topology: " + device.deviceId());
+        }
+
+        List<RoomNode> rooms = current.rooms().stream()
+            .map(room -> room.roomId().equals(device.roomId()) ? appendDevice(room, device.deviceId()) : room)
+            .toList();
+        List<ZoneNode> zones = current.zones().stream()
+            .map(zone -> zone.zoneId().equals(device.zoneId()) ? appendDevice(zone, device.deviceId()) : zone)
+            .toList();
+        List<DeviceNode> devices = new ArrayList<>(current.devices());
+        devices.add(device);
+        HabitatBaseTopology mutated = withVersionAndMetadata(new HabitatBaseTopology(
+            current.habitatId(),
+            current.topologyVersion(),
+            rooms,
+            zones,
+            devices,
+            current.endpoints(),
+            current.metadata()
+        ));
+        validateTopology(mutated);
+        repository.save(mutated);
+        emit(
+            current,
+            mutated,
+            Set.of(TopologyChangeKind.DEVICE_ADDED),
+            List.of(device.deviceId()),
+            List.of(),
+            "device added via materialization"
+        );
+
+        return new TopologyMutationResult(
+            habitatId,
+            current.topologyVersion(),
+            mutated.topologyVersion(),
+            Set.of(TopologyChangeKind.DEVICE_ADDED),
+            List.of(device.deviceId()),
+            List.of()
+        );
+    }
+
+    public TopologyMutationResult addCapabilityWithResult(String habitatId, String endpointId, CapabilityNode capability) {
+        Objects.requireNonNull(endpointId, "endpointId is required");
+        Objects.requireNonNull(capability, "capability is required");
+        HabitatBaseTopology current = repository.findByHabitatId(habitatId)
+            .orElseThrow(() -> new IllegalArgumentException("base topology does not exist for habitatId " + habitatId));
+        EndpointNode currentEndpoint = current.endpoints().stream()
+            .filter(endpoint -> endpoint.endpointId().equals(endpointId))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("endpointId does not exist in habitat topology: " + endpointId));
+        if (currentEndpoint.capabilities().stream()
+            .anyMatch(existing -> existing.capabilityId().equals(capability.capabilityId()))) {
+            throw new IllegalArgumentException("capabilityId already exists in endpoint topology: " + capability.capabilityId());
+        }
+
+        List<CapabilityNode> capabilities = new ArrayList<>(currentEndpoint.capabilities());
+        capabilities.add(capability);
+        EndpointNode mutatedEndpoint = new EndpointNode(
+            currentEndpoint.endpointId(),
+            currentEndpoint.deviceId(),
+            currentEndpoint.alias(),
+            currentEndpoint.displayName(),
+            currentEndpoint.kind(),
+            currentEndpoint.roomId(),
+            currentEndpoint.zoneId(),
+            capabilities,
+            currentEndpoint.traits(),
+            currentEndpoint.health(),
+            currentEndpoint.providerRef(),
+            currentEndpoint.metadata()
+        );
+        List<EndpointNode> endpoints = current.endpoints().stream()
+            .map(endpoint -> endpoint.endpointId().equals(endpointId) ? mutatedEndpoint : endpoint)
+            .toList();
+        HabitatBaseTopology mutated = withVersionAndMetadata(new HabitatBaseTopology(
+            current.habitatId(),
+            current.topologyVersion(),
+            current.rooms(),
+            current.zones(),
+            current.devices(),
+            endpoints,
+            current.metadata()
+        ));
+        validateTopology(mutated);
+        repository.save(mutated);
+        emit(
+            current,
+            mutated,
+            Set.of(TopologyChangeKind.CAPABILITY_ADDED),
+            List.of(currentEndpoint.deviceId()),
+            List.of(endpointId),
+            "capability added via materialization"
+        );
+
+        return new TopologyMutationResult(
+            habitatId,
+            current.topologyVersion(),
+            mutated.topologyVersion(),
+            Set.of(TopologyChangeKind.CAPABILITY_ADDED),
+            List.of(currentEndpoint.deviceId()),
+            List.of(endpointId)
+        );
+    }
+
     public void updateEndpointHealth(String habitatId, String endpointId, HealthStatus status) {
         Objects.requireNonNull(status, "status is required");
         HabitatBaseTopology current = repository.findByHabitatId(habitatId)
@@ -290,6 +399,16 @@ public class BaseTopologyService {
     private ZoneNode appendEndpoint(ZoneNode zone, String endpointId) {
         List<String> endpointIds = appendIfMissing(zone.endpointIds(), endpointId);
         return new ZoneNode(zone.zoneId(), zone.zoneName(), zone.roomId(), zone.deviceIds(), endpointIds, zone.traits());
+    }
+
+    private RoomNode appendDevice(RoomNode room, String deviceId) {
+        List<String> deviceIds = appendIfMissing(room.deviceIds(), deviceId);
+        return new RoomNode(room.roomId(), room.roomName(), room.zoneIds(), deviceIds, room.endpointIds(), room.traits());
+    }
+
+    private ZoneNode appendDevice(ZoneNode zone, String deviceId) {
+        List<String> deviceIds = appendIfMissing(zone.deviceIds(), deviceId);
+        return new ZoneNode(zone.zoneId(), zone.zoneName(), zone.roomId(), deviceIds, zone.endpointIds(), zone.traits());
     }
 
     private DeviceNode appendEndpoint(DeviceNode device, String endpointId) {
