@@ -26,7 +26,6 @@ import com.sovereign.connect.core.topology.model.ZoneNode;
 import com.sovereign.connect.core.topology.service.BaseTopologyService;
 
 import java.time.Clock;
-import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -225,7 +224,7 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
         repository.saveEndpointHealth(
             habitatId,
             endpointId,
-            new EndpointHealth(fact.healthStatus(), Instant.now(clock), fact.healthReason())
+            new EndpointHealth(fact.healthStatus(), fact.observedAt(), fact.healthReason())
         );
         return decision(
             habitatId,

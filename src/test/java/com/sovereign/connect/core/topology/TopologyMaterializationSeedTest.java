@@ -13,6 +13,7 @@ import com.sovereign.connect.core.topology.materialization.HealthFact;
 import com.sovereign.connect.core.topology.materialization.MaterializationDecision;
 import com.sovereign.connect.core.topology.materialization.MaterializationDecisionKind;
 import com.sovereign.connect.core.topology.model.CapabilityNode;
+import com.sovereign.connect.core.topology.model.DeviceNode;
 import com.sovereign.connect.core.topology.model.EndpointHealth;
 import com.sovereign.connect.core.topology.model.EndpointNode;
 import com.sovereign.connect.core.topology.model.HealthStatus;
@@ -79,6 +80,14 @@ class TopologyMaterializationSeedTest {
         MaterializationDecision deviceDecision = materializationService.materialize("habitat-007", deviceFact);
         assertStructuralDecision(deviceDecision, TopologyChangeKind.DEVICE_ADDED, canonicalDeviceId, null);
         assertThat(canonicalDeviceId).isNotEqualTo(deviceFact.providerDeviceId());
+        DeviceNode materializedDevice = queryService
+            .findDevice("habitat-007", canonicalDeviceId)
+            .orElseThrow()
+            .device();
+        assertThat(materializedDevice.providerRef().providerDeviceId())
+            .isEqualTo("tuya-device-abc");
+        assertThat(materializedDevice.providerRef().providerDeviceId())
+            .isNotEqualTo(materializedDevice.deviceId());
 
         MaterializationDecision duplicateDevice = materializationService.materialize("habitat-007", deviceFact);
         assertRejectedWithoutMutation(duplicateDevice, MaterializationDecisionKind.REJECT_DUPLICATE, deviceDecision.resultingTopologyVersion().orElseThrow(), queryService);
@@ -105,6 +114,14 @@ class TopologyMaterializationSeedTest {
         MaterializationDecision endpointDecision = materializationService.materialize("habitat-007", endpointFact);
         assertStructuralDecision(endpointDecision, TopologyChangeKind.ENDPOINT_ADDED, canonicalDeviceId, canonicalEndpointId);
         assertThat(canonicalEndpointId).isNotEqualTo(endpointFact.providerEndpointId());
+        EndpointNode materializedEndpoint = queryService
+            .findEndpoint("habitat-007", canonicalEndpointId)
+            .orElseThrow()
+            .endpoint();
+        assertThat(materializedEndpoint.providerRef().providerEndpointId())
+            .isEqualTo("dp-1");
+        assertThat(materializedEndpoint.providerRef().providerEndpointId())
+            .isNotEqualTo(materializedEndpoint.endpointId());
 
         MaterializationDecision duplicateEndpoint = materializationService.materialize("habitat-007", endpointFact);
         assertRejectedWithoutMutation(duplicateEndpoint, MaterializationDecisionKind.REJECT_DUPLICATE, endpointDecision.resultingTopologyVersion().orElseThrow(), queryService);
@@ -153,7 +170,7 @@ class TopologyMaterializationSeedTest {
         assertThat(healthDecision.emittedChanges()).isEmpty();
         assertThat(queryService.findCurrentTopologyVersion("habitat-007")).contains(versionBeforeHealth);
         assertThat(repository.findEndpointHealth("habitat-007", canonicalEndpointId))
-            .contains(new EndpointHealth(HealthStatus.DEGRADED, Instant.parse("2026-05-11T12:00:00Z"), "provider reported intermittent link"));
+            .contains(new EndpointHealth(HealthStatus.DEGRADED, Instant.parse("2026-05-11T12:00:05Z"), "provider reported intermittent link"));
 
         MaterializationDecision invalidHealth = materializationService.materialize(
             "habitat-007",
@@ -230,6 +247,98 @@ class TopologyMaterializationSeedTest {
             new TopologyTargetRef(canonicalDeviceId, canonicalEndpointId, canonicalCapabilityId),
             recovered.topologyVersion()
         )).isEqualTo(TargetValidationResult.VALID);
+    }
+
+    @Test
+    void endpointHealthSurvivesSubsequentStructuralMutation() {
+        String jdbcUrl = jdbcUrl();
+
+        H2BaseTopologyRepository repository =
+            new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
+
+        BaseTopologyService mutationService =
+            new BaseTopologyService(repository, clock);
+
+        CoreSnapshotQueryService queryService =
+            new CoreSnapshotQueryService(repository, clock);
+
+        DefaultTopologyMaterializationService materializer =
+            new DefaultTopologyMaterializationService(
+                mutationService,
+                repository,
+                id -> true,
+                clock
+            );
+
+        mutationService.createInitialTopology(
+            "habitat-overwrite",
+            List.of(room()),
+            List.of(zone()),
+            List.of(),
+            List.of()
+        );
+
+        materializer.materialize("habitat-overwrite", deviceFact("adapter-1"));
+        materializer.materialize("habitat-overwrite", endpointFact("adapter-1"));
+
+        String canonicalEndpointId =
+            materializer.canonicalEndpointId("tuya", "tuya-device-abc", "dp-1");
+
+        Instant observedAt = Instant.parse("2026-05-11T12:00:00Z");
+
+        materializer.materialize(
+            "habitat-overwrite",
+            new HealthFact(
+                UUID.randomUUID(),
+                "adapter-1",
+                "tuya",
+                "tuya-device-abc",
+                "dp-1",
+                HealthStatus.DEGRADED,
+                "intermittent link",
+                observedAt,
+                0.9
+            )
+        );
+
+        assertThat(repository.findEndpointHealth("habitat-overwrite", canonicalEndpointId))
+            .map(EndpointHealth::status)
+            .contains(HealthStatus.DEGRADED);
+
+        assertThat(repository.findEndpointHealth("habitat-overwrite", canonicalEndpointId))
+            .map(EndpointHealth::lastSeenAt)
+            .contains(observedAt);
+
+        materializer.materialize("habitat-overwrite", capabilityFact("adapter-1"));
+
+        assertThat(repository.findEndpointHealth("habitat-overwrite", canonicalEndpointId))
+            .map(EndpointHealth::status)
+            .as("endpoint health must survive a subsequent structural save")
+            .contains(HealthStatus.DEGRADED);
+
+        assertThat(repository.findEndpointHealth("habitat-overwrite", canonicalEndpointId))
+            .map(EndpointHealth::lastSeenAt)
+            .as("lastSeenAt must preserve the provider observation time")
+            .contains(observedAt);
+
+        repository = null;
+        mutationService = null;
+        queryService = null;
+        materializer = null;
+
+        H2BaseTopologyRepository newRepo =
+            new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
+
+        CoreSnapshotQueryService recoveredQueryService =
+            new CoreSnapshotQueryService(newRepo, clock);
+
+        assertThat(recoveredQueryService.findEndpointHealth("habitat-overwrite", canonicalEndpointId))
+            .map(EndpointHealth::status)
+            .contains(HealthStatus.DEGRADED);
+
+        assertThat(recoveredQueryService.findEndpointHealth("habitat-overwrite", canonicalEndpointId))
+            .map(EndpointHealth::lastSeenAt)
+            .contains(observedAt);
     }
 
     private void assertStructuralDecision(

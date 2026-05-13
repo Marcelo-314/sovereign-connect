@@ -68,7 +68,13 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSna
             topologyJson,
             Timestamp.from(capturedAt)
         );
-        topology.endpoints().forEach(endpoint -> saveEndpointHealth(topology.habitatId(), endpoint.endpointId(), endpoint.health()));
+        topology.endpoints().forEach(endpoint -> {
+            Optional<EndpointHealth> durable = findEndpointHealth(topology.habitatId(), endpoint.endpointId());
+
+            if (durable.isEmpty() || endpoint.health().status() != HealthStatus.UNKNOWN) {
+                saveEndpointHealth(topology.habitatId(), endpoint.endpointId(), endpoint.health());
+            }
+        });
     }
 
     @Override
