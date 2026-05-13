@@ -272,3 +272,31 @@ Result:
 Tests run: 24, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
+
+## Post-validation hardening
+
+MU-007 remains VALIDATED L4.
+
+Post-validation hardening applied:
+- providerRef field assertions added to `TopologyMaterializationSeedTest`
+- `endpointHealthSurvivesSubsequentStructuralMutation` regression test added
+- `EndpointHealth.lastSeenAt` is now asserted to preserve `HealthFact.observedAt()`
+- `DefaultTopologyMaterializationService` now materializes `EndpointHealth.lastSeenAt`
+  from `fact.observedAt()`, preserving provider observation time
+- `H2BaseTopologyRepository.save()` patched with transitional merge-semantics for
+  endpoint health: durable health written by `HealthFact` is preserved when
+  subsequent structural saves carry stale `UNKNOWN` aggregate health
+
+Corpus issues remaining:
+- Full separation of structural topology persistence from endpoint health persistence
+  remains open.
+- `TopologyMaterializationStatePort` extraction remains deferred to the next
+  health/materialization-related descent.
+
+Scope unchanged:
+- no SC-B introduced
+- no SC-D runtime introduced
+- no Projection / Effective View introduced
+- no Session / Identity / Authority / Policy introduced
+- no `TopologyChanged` shape change
+- no MIR-007 acceptance criteria change
