@@ -131,6 +131,11 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
             return rejectDuplicate(habitatId, fact);
         }
 
+        EndpointHealth initialHealth = new EndpointHealth(
+            HealthStatus.UNKNOWN,
+            fact.observedAt(),
+            "materialized from discovery fact"
+        );
         EndpointNode endpoint = new EndpointNode(
             endpointId,
             deviceId,
@@ -143,13 +148,14 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
                 .map(hint -> capabilityFromHint(fact.providerId(), fact.providerDeviceId(), fact.providerEndpointId(), hint))
                 .toList(),
             new EndpointTraits(true, true, true, true, false, false),
-            new EndpointHealth(HealthStatus.UNKNOWN, fact.observedAt(), "materialized from discovery fact"),
+            initialHealth,
             new ProviderEndpointRef(fact.providerId(), fact.providerDeviceId(), fact.providerEndpointId(), stringMetadata(fact.rawProviderMetadata())),
             EndpointMetadata.empty()
         );
 
         int before = baseTopologyService.emittedEvents().size();
         TopologyMutationResult result = baseTopologyService.addEndpointWithResult(habitatId, endpoint);
+        repository.saveEndpointHealth(habitatId, endpointId, initialHealth);
         return acceptStructural(habitatId, fact, result, eventDelta(before), "endpoint materialized");
     }
 

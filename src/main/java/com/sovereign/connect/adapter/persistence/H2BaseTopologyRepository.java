@@ -6,13 +6,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sovereign.connect.core.topology.event.TopologyChangeKind;
 import com.sovereign.connect.core.topology.model.BaseTopologySnapshot;
 import com.sovereign.connect.core.topology.model.EndpointHealth;
-import com.sovereign.connect.core.topology.model.EndpointNode;
 import com.sovereign.connect.core.topology.model.HabitatBaseTopology;
 import com.sovereign.connect.core.topology.model.HealthStatus;
 import com.sovereign.connect.core.topology.model.TopologyMutationRecord;
 import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.port.BaseTopologyRepository;
 import com.sovereign.connect.core.topology.port.CoreSnapshotReadPort;
+import com.sovereign.connect.core.topology.port.EndpointHealthWritePort;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
@@ -31,7 +31,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSnapshotReadPort {
+public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSnapshotReadPort, EndpointHealthWritePort {
 
     private static final TypeReference<Map<String, Object>> STATE_TYPE = new TypeReference<>() {
     };
@@ -68,13 +68,6 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSna
             topologyJson,
             Timestamp.from(capturedAt)
         );
-        topology.endpoints().forEach(endpoint -> {
-            Optional<EndpointHealth> durable = findEndpointHealth(topology.habitatId(), endpoint.endpointId());
-
-            if (durable.isEmpty() || endpoint.health().status() != HealthStatus.UNKNOWN) {
-                saveEndpointHealth(topology.habitatId(), endpoint.endpointId(), endpoint.health());
-            }
-        });
     }
 
     @Override
