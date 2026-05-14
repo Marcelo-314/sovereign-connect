@@ -59,7 +59,7 @@ class PersistenceMemorySeedTest {
     void ac001ToAc025TopologyMemorySurvivesAdapterAndServiceRecreation() {
         String jdbcUrl = jdbcUrl();
         H2BaseTopologyRepository firstRepository = new H2BaseTopologyRepository(dataSource(jdbcUrl), clockedMapper(), clock);
-        BaseTopologyService firstService = new BaseTopologyService(firstRepository, clock);
+        BaseTopologyService firstService = new BaseTopologyService(firstRepository, firstRepository, clock);
 
         HabitatBaseTopology initial = firstService.createInitialTopology(
             "habitat-001",
@@ -93,7 +93,7 @@ class PersistenceMemorySeedTest {
         firstService = null;
 
         H2BaseTopologyRepository recoveredRepository = new H2BaseTopologyRepository(dataSource(jdbcUrl), clockedMapper(), clock);
-        BaseTopologyService recoveredService = new BaseTopologyService(recoveredRepository, clock);
+        BaseTopologyService recoveredService = new BaseTopologyService(recoveredRepository, recoveredRepository, clock);
 
         BaseTopologySnapshot snapshot = recoveredRepository.findSnapshot("habitat-001").orElseThrow();
         HabitatBaseTopology recoveredTopology = recoveredRepository.findByHabitatId("habitat-001").orElseThrow();

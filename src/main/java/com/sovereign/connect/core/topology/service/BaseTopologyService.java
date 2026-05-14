@@ -17,6 +17,7 @@ import com.sovereign.connect.core.topology.model.TopologyTargetRef;
 import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.model.ZoneNode;
 import com.sovereign.connect.core.topology.port.BaseTopologyRepository;
+import com.sovereign.connect.core.topology.port.EndpointHealthWritePort;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -37,16 +38,26 @@ public class BaseTopologyService {
     private static final String SOURCE = "SC-C";
 
     private final BaseTopologyRepository repository;
+    private final EndpointHealthWritePort healthWritePort;
     private final Clock clock;
     private final List<TopologyChanged> emittedEvents = new ArrayList<>();
     private final ConcurrentMap<String, Map<String, Object>> deviceStates = new ConcurrentHashMap<>();
 
     public BaseTopologyService(BaseTopologyRepository repository) {
-        this(repository, Clock.systemUTC());
+        this(repository, EndpointHealthWritePort.noOp(), Clock.systemUTC());
     }
 
     public BaseTopologyService(BaseTopologyRepository repository, Clock clock) {
+        this(repository, EndpointHealthWritePort.noOp(), clock);
+    }
+
+    public BaseTopologyService(
+        BaseTopologyRepository repository,
+        EndpointHealthWritePort healthWritePort,
+        Clock clock
+    ) {
         this.repository = Objects.requireNonNull(repository, "repository is required");
+        this.healthWritePort = Objects.requireNonNull(healthWritePort, "healthWritePort is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
     }
 
@@ -263,6 +274,10 @@ public class BaseTopologyService {
             endpoints,
             current.metadata()
         ));
+        endpoints.stream()
+            .filter(endpoint -> endpoint.endpointId().equals(endpointId))
+            .findFirst()
+            .ifPresent(endpoint -> healthWritePort.saveEndpointHealth(habitatId, endpointId, endpoint.health()));
     }
 
     public void updateDeviceState(String habitatId, String deviceId, Map<String, Object> state) {
