@@ -8,7 +8,9 @@ public sealed interface TopologyFact permits
     EndpointDiscoveryFact,
     CapabilityDiscoveryFact,
     DeviceStateFact,
-    HealthFact {
+    HealthFact,
+    RoomDiscoveryFact,
+    ZoneDiscoveryFact {
 
     UUID factId();
 

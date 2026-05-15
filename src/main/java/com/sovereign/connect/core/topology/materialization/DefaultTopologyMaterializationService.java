@@ -18,10 +18,20 @@ import com.sovereign.connect.core.topology.model.HabitatBaseTopology;
 import com.sovereign.connect.core.topology.model.HealthStatus;
 import com.sovereign.connect.core.topology.model.ProviderDeviceRef;
 import com.sovereign.connect.core.topology.model.ProviderEndpointRef;
+import com.sovereign.connect.core.topology.model.ProviderSpatialRef;
+import com.sovereign.connect.core.topology.model.RelationConfidence;
 import com.sovereign.connect.core.topology.model.RoomNode;
+import com.sovereign.connect.core.topology.model.RoomTraits;
+import com.sovereign.connect.core.topology.model.SpatialRelationSource;
 import com.sovereign.connect.core.topology.model.TopologyMutationResult;
+import com.sovereign.connect.core.topology.model.TopologySpatialEntityType;
+import com.sovereign.connect.core.topology.model.TopologySpatialRelation;
+import com.sovereign.connect.core.topology.model.TopologySpatialRelationKind;
+import com.sovereign.connect.core.topology.model.TopologySpatialSubject;
+import com.sovereign.connect.core.topology.model.TopologySpatialTarget;
 import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.model.ZoneNode;
+import com.sovereign.connect.core.topology.model.ZoneTraits;
 import com.sovereign.connect.core.topology.port.TopologyMaterializationStatePort;
 import com.sovereign.connect.core.topology.service.BaseTopologyService;
 
@@ -62,6 +72,8 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
             case CapabilityDiscoveryFact f -> materializeCapability(habitatId, f);
             case DeviceStateFact f -> materializeDeviceState(habitatId, f);
             case HealthFact f -> materializeHealth(habitatId, f);
+            case RoomDiscoveryFact f -> materializeRoom(habitatId, f);
+            case ZoneDiscoveryFact f -> materializeZone(habitatId, f);
         };
     }
 
@@ -80,6 +92,14 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
         String providerCapabilityKey
     ) {
         return "capability." + providerId + "." + providerDeviceId + "." + providerEndpointId + "." + providerCapabilityKey;
+    }
+
+    public String canonicalRoomId(String providerId, String roomNameHint) {
+        return "room." + providerId + "." + canonicalToken(roomNameHint);
+    }
+
+    public String canonicalZoneId(String providerId, String targetRoomId, String zoneNameHint) {
+        return "zone." + providerId + "." + canonicalToken(targetRoomId) + "." + canonicalToken(zoneNameHint);
     }
 
     private MaterializationDecision materializeDevice(String habitatId, DeviceDiscoveryFact fact) {
@@ -111,7 +131,15 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
 
         int before = baseTopologyService.emittedEvents().size();
         TopologyMutationResult result = baseTopologyService.addDeviceWithResult(habitatId, device);
-        return acceptStructural(habitatId, fact, result, eventDelta(before), "device materialized");
+        TopologyMutationResult finalResult = addPlacementRelations(
+            habitatId,
+            deviceId,
+            TopologySpatialEntityType.DEVICE,
+            roomId,
+            zoneId,
+            fact
+        );
+        return acceptStructural(habitatId, fact, finalResult == null ? result : finalResult, eventDelta(before), "device materialized");
     }
 
     private MaterializationDecision materializeEndpoint(String habitatId, EndpointDiscoveryFact fact) {
@@ -155,8 +183,65 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
 
         int before = baseTopologyService.emittedEvents().size();
         TopologyMutationResult result = baseTopologyService.addEndpointWithResult(habitatId, endpoint);
+        TopologyMutationResult finalResult = addPlacementRelations(
+            habitatId,
+            endpointId,
+            TopologySpatialEntityType.ENDPOINT,
+            device.get().roomId(),
+            device.get().zoneId(),
+            fact
+        );
         statePort.saveEndpointHealth(habitatId, endpointId, initialHealth);
-        return acceptStructural(habitatId, fact, result, eventDelta(before), "endpoint materialized");
+        return acceptStructural(habitatId, fact, finalResult == null ? result : finalResult, eventDelta(before), "endpoint materialized");
+    }
+
+    private MaterializationDecision materializeRoom(String habitatId, RoomDiscoveryFact fact) {
+        Optional<HabitatBaseTopology> topology = admittedTopology(habitatId, fact);
+        if (topology.isEmpty()) {
+            return rejectedByPrecondition(habitatId, fact);
+        }
+        String roomId = canonicalRoomId(fact.providerId(), fact.roomNameHint());
+        if (topology.get().rooms().stream().anyMatch(room -> room.roomId().equals(roomId))) {
+            return rejectDuplicate(habitatId, fact);
+        }
+        RoomNode room = new RoomNode(
+            roomId,
+            fallback(fact.roomNameHint(), roomId),
+            List.of(),
+            List.of(),
+            List.of(),
+            fact.traitsHint() == null ? new RoomTraits(false, false) : fact.traitsHint()
+        );
+
+        int before = baseTopologyService.emittedEvents().size();
+        TopologyMutationResult result = baseTopologyService.addRoomWithResult(habitatId, room);
+        return acceptStructural(habitatId, fact, result, eventDelta(before), "room materialized");
+    }
+
+    private MaterializationDecision materializeZone(String habitatId, ZoneDiscoveryFact fact) {
+        Optional<HabitatBaseTopology> topology = admittedTopology(habitatId, fact);
+        if (topology.isEmpty()) {
+            return rejectedByPrecondition(habitatId, fact);
+        }
+        if (topology.get().rooms().stream().noneMatch(room -> room.roomId().equals(fact.targetRoomId()))) {
+            return rejectInvalid(habitatId, fact, "target room not found");
+        }
+        String zoneId = canonicalZoneId(fact.providerId(), fact.targetRoomId(), fact.zoneNameHint());
+        if (topology.get().zones().stream().anyMatch(zone -> zone.zoneId().equals(zoneId))) {
+            return rejectDuplicate(habitatId, fact);
+        }
+        ZoneNode zone = new ZoneNode(
+            zoneId,
+            fallback(fact.zoneNameHint(), zoneId),
+            fact.targetRoomId(),
+            List.of(),
+            List.of(),
+            fact.traitsHint() == null ? new ZoneTraits(true) : fact.traitsHint()
+        );
+
+        int before = baseTopologyService.emittedEvents().size();
+        TopologyMutationResult result = baseTopologyService.addZoneWithResult(habitatId, zone);
+        return acceptStructural(habitatId, fact, result, eventDelta(before), "zone materialized");
     }
 
     private MaterializationDecision materializeCapability(String habitatId, CapabilityDiscoveryFact fact) {
@@ -335,6 +420,63 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
         return List.copyOf(events.subList(before, events.size()));
     }
 
+    private TopologyMutationResult addPlacementRelations(
+        String habitatId,
+        String subjectId,
+        TopologySpatialEntityType subjectType,
+        String roomId,
+        String zoneId,
+        TopologyFact fact
+    ) {
+        TopologyMutationResult result = baseTopologyService.addSpatialRelationWithResult(
+            habitatId,
+            buildLocatedIn(subjectId, subjectType, roomId, TopologySpatialEntityType.ROOM, fact)
+        );
+        if (zoneId != null && !zoneId.isBlank()) {
+            result = baseTopologyService.addSpatialRelationWithResult(
+                habitatId,
+                buildLocatedIn(subjectId, subjectType, zoneId, TopologySpatialEntityType.ZONE, fact)
+            );
+        }
+        return result;
+    }
+
+    private TopologySpatialRelation buildLocatedIn(
+        String subjectId,
+        TopologySpatialEntityType subjectType,
+        String targetId,
+        TopologySpatialEntityType targetType,
+        TopologyFact fact
+    ) {
+        boolean providerPlacement = hasProviderPlacementHint(fact, targetType);
+        return new TopologySpatialRelation(
+            "relation.located-in." + subjectType.name().toLowerCase() + "." + subjectId + "."
+                + targetType.name().toLowerCase() + "." + targetId,
+            TopologySpatialRelationKind.LOCATED_IN,
+            new TopologySpatialSubject(subjectType, subjectId),
+            new TopologySpatialTarget(targetType, targetId),
+            true,
+            providerPlacement ? RelationConfidence.PROVIDER_REPORTED : RelationConfidence.INFERRED,
+            providerPlacement ? SpatialRelationSource.PROVIDER : SpatialRelationSource.INFERENCE,
+            spatialProviderRef(fact),
+            fact.observedAt(),
+            Map.of("materializedBy", "SC-C")
+        );
+    }
+
+    private boolean hasProviderPlacementHint(TopologyFact fact, TopologySpatialEntityType targetType) {
+        if (fact instanceof DeviceDiscoveryFact deviceFact) {
+            return targetType == TopologySpatialEntityType.ROOM
+                ? deviceFact.roomHint() != null && !deviceFact.roomHint().isBlank()
+                : deviceFact.zoneHint() != null && !deviceFact.zoneHint().isBlank();
+        }
+        return false;
+    }
+
+    private ProviderSpatialRef spatialProviderRef(TopologyFact fact) {
+        return new ProviderSpatialRef(fact.providerId(), null, null, null, Map.of());
+    }
+
     private String chooseRoomId(HabitatBaseTopology topology, String roomHint) {
         if (roomHint != null && topology.rooms().stream().anyMatch(room -> room.roomId().equals(roomHint))) {
             return roomHint;
@@ -401,5 +543,11 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
     private String aliasFrom(String id) {
         int lastDot = id.lastIndexOf('.');
         return lastDot >= 0 ? id.substring(lastDot + 1) : id;
+    }
+
+    private String canonicalToken(String value) {
+        String token = fallback(value, "unknown").trim().toLowerCase().replaceAll("[^a-z0-9]+", ".");
+        token = token.replaceAll("^\\.+|\\.+$", "");
+        return token.isBlank() ? "unknown" : token;
     }
 }

@@ -351,8 +351,13 @@ class TopologyMaterializationSeedTest {
         assertThat(decision.resultingTopologyVersion()).isPresent();
         assertThat(decision.previousTopologyVersion()).isPresent();
         assertThat(decision.resultingTopologyVersion()).isNotEqualTo(decision.previousTopologyVersion());
-        assertThat(decision.emittedChanges()).hasSize(1);
-        TopologyChanged event = decision.emittedChanges().getFirst();
+        assertThat(decision.emittedChanges()).isNotEmpty();
+        TopologyChanged event = decision.emittedChanges().stream()
+            .filter(candidate -> candidate.changeKinds().contains(changeKind))
+            .findFirst()
+            .orElseThrow();
+        assertThat(decision.resultingTopologyVersion().orElseThrow().value())
+            .isEqualTo(decision.emittedChanges().getLast().toVersion());
         assertThat(event.changeKinds()).contains(changeKind);
         assertThat(event.fromVersion()).isNotEqualTo(event.toVersion());
         assertThat(event.affectedDeviceIds()).contains(deviceId);

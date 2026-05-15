@@ -1,6 +1,8 @@
 package com.sovereign.connect.core.topology.event;
 
 public enum TopologyChangeKind {
+    ROOM_ADDED,
+    ZONE_ADDED,
     DEVICE_ADDED,
     DEVICE_REMOVED,
     ENDPOINT_ADDED,

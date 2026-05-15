@@ -5,12 +5,17 @@ import com.sovereign.connect.core.topology.model.DeviceNode;
 import com.sovereign.connect.core.topology.model.EndpointHealth;
 import com.sovereign.connect.core.topology.model.EndpointNode;
 import com.sovereign.connect.core.topology.model.HabitatBaseTopology;
+import com.sovereign.connect.core.topology.model.RoomNode;
+import com.sovereign.connect.core.topology.model.TopologySpatialEntityType;
+import com.sovereign.connect.core.topology.model.TopologySpatialRelation;
 import com.sovereign.connect.core.topology.model.TopologyVersion;
+import com.sovereign.connect.core.topology.model.ZoneNode;
 import com.sovereign.connect.core.topology.port.CoreSnapshotReadPort;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -87,6 +92,42 @@ public class CoreSnapshotQueryService {
 
     public Optional<EndpointHealth> findEndpointHealth(String habitatId, String endpointId) {
         return readPort.findEndpointHealth(habitatId, endpointId);
+    }
+
+    public Optional<RoomNode> findRoom(String habitatId, String roomId) {
+        return readPort.findRoom(habitatId, roomId);
+    }
+
+    public Optional<ZoneNode> findZone(String habitatId, String zoneId) {
+        return readPort.findZone(habitatId, zoneId);
+    }
+
+    public Optional<TopologySpatialRelation> findSpatialRelation(String habitatId, String relationId) {
+        return readPort.findSpatialRelation(habitatId, relationId);
+    }
+
+    public List<TopologySpatialRelation> findSpatialRelationsBySubject(
+        String habitatId,
+        TopologySpatialEntityType type,
+        String id
+    ) {
+        return readPort.findSpatialRelationsBySubject(habitatId, type, id);
+    }
+
+    public List<DeviceNode> findLocatedDevices(String habitatId, String roomOrZoneId) {
+        return readPort.findLocatedDevices(habitatId, roomOrZoneId);
+    }
+
+    public List<EndpointNode> findLocatedEndpoints(String habitatId, String roomOrZoneId) {
+        return readPort.findLocatedEndpoints(habitatId, roomOrZoneId);
+    }
+
+    public Optional<TopologySpatialRelation> resolvePrimaryPlacement(
+        String habitatId,
+        TopologySpatialEntityType type,
+        String id
+    ) {
+        return readPort.resolvePrimaryPlacement(habitatId, type, id);
     }
 
     private CoreSnapshot toCoreSnapshot(BaseTopologySnapshot snapshot) {
