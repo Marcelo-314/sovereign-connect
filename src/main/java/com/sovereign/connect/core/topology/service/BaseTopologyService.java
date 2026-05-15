@@ -13,6 +13,9 @@ import com.sovereign.connect.core.topology.model.TargetValidationResult;
 import com.sovereign.connect.core.topology.model.TopologyMetadata;
 import com.sovereign.connect.core.topology.model.TopologyMutationResult;
 import com.sovereign.connect.core.topology.model.TopologyNode;
+import com.sovereign.connect.core.topology.model.TopologySpatialEntityType;
+import com.sovereign.connect.core.topology.model.TopologySpatialRelation;
+import com.sovereign.connect.core.topology.model.TopologySpatialRelationKind;
 import com.sovereign.connect.core.topology.model.TopologyTargetRef;
 import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.model.ZoneNode;
@@ -79,6 +82,7 @@ public class BaseTopologyService {
             zones,
             devices,
             endpoints,
+            List.of(),
             metadataNow()
         );
         validateTopology(topology);
@@ -122,6 +126,7 @@ public class BaseTopologyService {
                 zones,
                 devices,
                 endpoints,
+                current.spatialRelations(),
                 current.metadata()
             )
         );
@@ -168,6 +173,7 @@ public class BaseTopologyService {
             zones,
             devices,
             current.endpoints(),
+            current.spatialRelations(),
             current.metadata()
         ));
         validateTopology(mutated);
@@ -231,6 +237,7 @@ public class BaseTopologyService {
             current.zones(),
             current.devices(),
             endpoints,
+            current.spatialRelations(),
             current.metadata()
         ));
         validateTopology(mutated);
@@ -254,6 +261,154 @@ public class BaseTopologyService {
         );
     }
 
+    public TopologyMutationResult addRoomWithResult(String habitatId, RoomNode room) {
+        Objects.requireNonNull(room, "room is required");
+        HabitatBaseTopology current = repository.findByHabitatId(habitatId)
+            .orElseThrow(() -> new IllegalArgumentException("base topology does not exist for habitatId " + habitatId));
+        if (current.rooms().stream().anyMatch(existing -> existing.roomId().equals(room.roomId()))) {
+            throw new IllegalArgumentException("roomId already exists: " + room.roomId());
+        }
+
+        List<RoomNode> rooms = new ArrayList<>(current.rooms());
+        rooms.add(room);
+        HabitatBaseTopology mutated = withVersionAndMetadata(new HabitatBaseTopology(
+            current.habitatId(),
+            current.topologyVersion(),
+            rooms,
+            current.zones(),
+            current.devices(),
+            current.endpoints(),
+            current.spatialRelations(),
+            current.metadata()
+        ));
+        validateTopology(mutated);
+        repository.save(mutated);
+        emit(
+            current,
+            mutated,
+            Set.of(TopologyChangeKind.ROOM_ADDED),
+            List.of(room.roomId()),
+            List.of(),
+            List.of(),
+            List.of(),
+            "room added"
+        );
+
+        return new TopologyMutationResult(
+            habitatId,
+            current.topologyVersion(),
+            mutated.topologyVersion(),
+            Set.of(TopologyChangeKind.ROOM_ADDED),
+            List.of(),
+            List.of(),
+            List.of(room.roomId()),
+            List.of()
+        );
+    }
+
+    public TopologyMutationResult addZoneWithResult(String habitatId, ZoneNode zone) {
+        Objects.requireNonNull(zone, "zone is required");
+        HabitatBaseTopology current = repository.findByHabitatId(habitatId)
+            .orElseThrow(() -> new IllegalArgumentException("base topology does not exist for habitatId " + habitatId));
+        if (current.zones().stream().anyMatch(existing -> existing.zoneId().equals(zone.zoneId()))) {
+            throw new IllegalArgumentException("zoneId already exists: " + zone.zoneId());
+        }
+        if (current.rooms().stream().noneMatch(room -> room.roomId().equals(zone.roomId()))) {
+            throw new IllegalArgumentException("zone roomId must refer to an existing RoomNode");
+        }
+
+        List<RoomNode> rooms = current.rooms().stream()
+            .map(room -> room.roomId().equals(zone.roomId()) ? appendZone(room, zone.zoneId()) : room)
+            .toList();
+        List<ZoneNode> zones = new ArrayList<>(current.zones());
+        zones.add(zone);
+        HabitatBaseTopology mutated = withVersionAndMetadata(new HabitatBaseTopology(
+            current.habitatId(),
+            current.topologyVersion(),
+            rooms,
+            zones,
+            current.devices(),
+            current.endpoints(),
+            current.spatialRelations(),
+            current.metadata()
+        ));
+        validateTopology(mutated);
+        repository.save(mutated);
+        emit(
+            current,
+            mutated,
+            Set.of(TopologyChangeKind.ZONE_ADDED),
+            List.of(zone.roomId()),
+            List.of(zone.zoneId()),
+            List.of(),
+            List.of(),
+            "zone added"
+        );
+
+        return new TopologyMutationResult(
+            habitatId,
+            current.topologyVersion(),
+            mutated.topologyVersion(),
+            Set.of(TopologyChangeKind.ZONE_ADDED),
+            List.of(),
+            List.of(),
+            List.of(zone.roomId()),
+            List.of(zone.zoneId())
+        );
+    }
+
+    public TopologyMutationResult addSpatialRelationWithResult(
+        String habitatId,
+        TopologySpatialRelation relation
+    ) {
+        Objects.requireNonNull(relation, "relation is required");
+        HabitatBaseTopology current = repository.findByHabitatId(habitatId)
+            .orElseThrow(() -> new IllegalArgumentException("base topology does not exist for habitatId " + habitatId));
+        validateSpatialRelationReference(current, relation);
+        if (current.spatialRelations().stream().anyMatch(existing -> existing.relationId().equals(relation.relationId()))) {
+            throw new IllegalArgumentException("spatial relation already exists: " + relation.relationId());
+        }
+        if (hasConflictingPrimaryRelation(current, relation)) {
+            throw new IllegalArgumentException("conflicting primary LOCATED_IN relation");
+        }
+
+        List<TopologySpatialRelation> spatialRelations = new ArrayList<>(current.spatialRelations());
+        spatialRelations.add(relation);
+        HabitatBaseTopology mutated = withVersionAndMetadata(new HabitatBaseTopology(
+            current.habitatId(),
+            current.topologyVersion(),
+            current.rooms(),
+            current.zones(),
+            current.devices(),
+            current.endpoints(),
+            spatialRelations,
+            current.metadata()
+        ));
+        validateTopology(mutated);
+        repository.save(mutated);
+        emit(
+            current,
+            mutated,
+            Set.of(TopologyChangeKind.SPATIAL_ASSIGNMENT_CHANGED),
+            affectedRoomIds(relation),
+            affectedZoneIds(relation),
+            affectedDeviceIds(relation),
+            affectedEndpointIds(relation),
+            "spatial relation added"
+        );
+
+        return new TopologyMutationResult(
+            habitatId,
+            current.topologyVersion(),
+            mutated.topologyVersion(),
+            Set.of(TopologyChangeKind.SPATIAL_ASSIGNMENT_CHANGED),
+            affectedDeviceIds(relation),
+            affectedEndpointIds(relation),
+            affectedRoomIds(relation),
+            affectedZoneIds(relation)
+        );
+    }
+
     public void updateEndpointHealth(String habitatId, String endpointId, HealthStatus status) {
         Objects.requireNonNull(status, "status is required");
         HabitatBaseTopology current = repository.findByHabitatId(habitatId)
@@ -272,6 +427,7 @@ public class BaseTopologyService {
             current.zones(),
             current.devices(),
             endpoints,
+            current.spatialRelations(),
             current.metadata()
         ));
         endpoints.stream()
@@ -335,6 +491,7 @@ public class BaseTopologyService {
             topology.zones(),
             topology.devices(),
             topology.endpoints(),
+            topology.spatialRelations(),
             metadataNow()
         );
     }
@@ -343,6 +500,19 @@ public class BaseTopologyService {
         HabitatBaseTopology from,
         HabitatBaseTopology to,
         Set<TopologyChangeKind> changeKinds,
+        List<String> deviceIds,
+        List<String> endpointIds,
+        String reason
+    ) {
+        emit(from, to, changeKinds, List.of(), List.of(), deviceIds, endpointIds, reason);
+    }
+
+    private void emit(
+        HabitatBaseTopology from,
+        HabitatBaseTopology to,
+        Set<TopologyChangeKind> changeKinds,
+        List<String> roomIds,
+        List<String> zoneIds,
         List<String> deviceIds,
         List<String> endpointIds,
         String reason
@@ -356,6 +526,8 @@ public class BaseTopologyService {
             changeKinds,
             deviceIds,
             endpointIds,
+            roomIds,
+            zoneIds,
             reason
         ));
     }
@@ -414,6 +586,11 @@ public class BaseTopologyService {
     private ZoneNode appendEndpoint(ZoneNode zone, String endpointId) {
         List<String> endpointIds = appendIfMissing(zone.endpointIds(), endpointId);
         return new ZoneNode(zone.zoneId(), zone.zoneName(), zone.roomId(), zone.deviceIds(), endpointIds, zone.traits());
+    }
+
+    private RoomNode appendZone(RoomNode room, String zoneId) {
+        List<String> zoneIds = appendIfMissing(room.zoneIds(), zoneId);
+        return new RoomNode(room.roomId(), room.roomName(), zoneIds, room.deviceIds(), room.endpointIds(), room.traits());
     }
 
     private RoomNode appendDevice(RoomNode room, String deviceId) {
@@ -520,6 +697,101 @@ public class BaseTopologyService {
             }
             validateUnique("endpoint capabilityId", endpoint.capabilities().stream().map(CapabilityNode::capabilityId).toList());
         }
+
+        Set<String> primarySpatialKeys = new HashSet<>();
+        for (TopologySpatialRelation relation : topology.spatialRelations()) {
+            validateSpatialRelationReference(topology, relation);
+            if (relation.primary() && !primarySpatialKeys.add(primarySpatialKey(relation))) {
+                throw new IllegalArgumentException("primary spatial relation must be unique for subject and target entity type");
+            }
+        }
+    }
+
+    private void validateSpatialRelationReference(HabitatBaseTopology topology, TopologySpatialRelation relation) {
+        Objects.requireNonNull(relation.relationId(), "relationId is required");
+        Objects.requireNonNull(relation.kind(), "kind is required");
+        Objects.requireNonNull(relation.subject(), "subject is required");
+        Objects.requireNonNull(relation.target(), "target is required");
+        if (!entityExists(topology, relation.subject().type(), relation.subject().id())
+            || !entityExists(topology, relation.target().type(), relation.target().id())) {
+            throw new IllegalArgumentException("LOCATED_IN relation subject/target does not exist");
+        }
+        if (relation.kind() == TopologySpatialRelationKind.LOCATED_IN) {
+            validateLocatedInCompatibility(topology, relation);
+        }
+    }
+
+    private void validateLocatedInCompatibility(HabitatBaseTopology topology, TopologySpatialRelation relation) {
+        if (relation.subject().type() == TopologySpatialEntityType.DEVICE) {
+            DeviceNode device = topology.devices().stream()
+                .filter(candidate -> candidate.deviceId().equals(relation.subject().id()))
+                .findFirst()
+                .orElseThrow();
+            if (relation.target().type() == TopologySpatialEntityType.ROOM && !device.roomId().equals(relation.target().id())) {
+                throw new IllegalArgumentException("LOCATED_IN relation disagrees with device roomId");
+            }
+            if (relation.target().type() == TopologySpatialEntityType.ZONE && !device.zoneId().equals(relation.target().id())) {
+                throw new IllegalArgumentException("LOCATED_IN relation disagrees with device zoneId");
+            }
+        }
+        if (relation.subject().type() == TopologySpatialEntityType.ENDPOINT) {
+            EndpointNode endpoint = topology.endpoints().stream()
+                .filter(candidate -> candidate.endpointId().equals(relation.subject().id()))
+                .findFirst()
+                .orElseThrow();
+            if (relation.target().type() == TopologySpatialEntityType.ROOM && !endpoint.roomId().equals(relation.target().id())) {
+                throw new IllegalArgumentException("LOCATED_IN relation disagrees with endpoint roomId");
+            }
+            if (relation.target().type() == TopologySpatialEntityType.ZONE && !endpoint.zoneId().equals(relation.target().id())) {
+                throw new IllegalArgumentException("LOCATED_IN relation disagrees with endpoint zoneId");
+            }
+        }
+    }
+
+    private boolean entityExists(HabitatBaseTopology topology, TopologySpatialEntityType type, String id) {
+        return switch (type) {
+            case ROOM -> topology.rooms().stream().anyMatch(room -> room.roomId().equals(id));
+            case ZONE -> topology.zones().stream().anyMatch(zone -> zone.zoneId().equals(id));
+            case DEVICE -> topology.devices().stream().anyMatch(device -> device.deviceId().equals(id));
+            case ENDPOINT -> topology.endpoints().stream().anyMatch(endpoint -> endpoint.endpointId().equals(id));
+        };
+    }
+
+    private boolean hasConflictingPrimaryRelation(HabitatBaseTopology topology, TopologySpatialRelation relation) {
+        if (!relation.primary()) {
+            return false;
+        }
+        return topology.spatialRelations().stream()
+            .filter(TopologySpatialRelation::primary)
+            .anyMatch(existing -> primarySpatialKey(existing).equals(primarySpatialKey(relation)));
+    }
+
+    private String primarySpatialKey(TopologySpatialRelation relation) {
+        return relation.kind() + ":"
+            + relation.subject().type() + ":" + relation.subject().id() + ":"
+            + relation.target().type();
+    }
+
+    private List<String> affectedRoomIds(TopologySpatialRelation relation) {
+        if (relation.target().type() == TopologySpatialEntityType.ROOM) {
+            return List.of(relation.target().id());
+        }
+        return relation.subject().type() == TopologySpatialEntityType.ROOM ? List.of(relation.subject().id()) : List.of();
+    }
+
+    private List<String> affectedZoneIds(TopologySpatialRelation relation) {
+        if (relation.target().type() == TopologySpatialEntityType.ZONE) {
+            return List.of(relation.target().id());
+        }
+        return relation.subject().type() == TopologySpatialEntityType.ZONE ? List.of(relation.subject().id()) : List.of();
+    }
+
+    private List<String> affectedDeviceIds(TopologySpatialRelation relation) {
+        return relation.subject().type() == TopologySpatialEntityType.DEVICE ? List.of(relation.subject().id()) : List.of();
+    }
+
+    private List<String> affectedEndpointIds(TopologySpatialRelation relation) {
+        return relation.subject().type() == TopologySpatialEntityType.ENDPOINT ? List.of(relation.subject().id()) : List.of();
     }
 
     private void ensureCanonicalId(TopologyNode node) {

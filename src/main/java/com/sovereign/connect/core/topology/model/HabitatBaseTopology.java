@@ -10,6 +10,7 @@ public record HabitatBaseTopology(
     List<ZoneNode> zones,
     List<DeviceNode> devices,
     List<EndpointNode> endpoints,
+    List<TopologySpatialRelation> spatialRelations,
     TopologyMetadata metadata
 ) {
 
@@ -24,6 +25,7 @@ public record HabitatBaseTopology(
         zones = List.copyOf(Objects.requireNonNull(zones, "zones is required"));
         devices = List.copyOf(Objects.requireNonNull(devices, "devices is required"));
         endpoints = List.copyOf(Objects.requireNonNull(endpoints, "endpoints is required"));
+        spatialRelations = List.copyOf(spatialRelations != null ? spatialRelations : List.of());
     }
 
     public long versionValue() {

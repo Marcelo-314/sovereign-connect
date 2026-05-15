@@ -15,6 +15,8 @@ public record TopologyChanged(
     Set<TopologyChangeKind> changeKinds,
     List<String> affectedDeviceIds,
     List<String> affectedEndpointIds,
+    List<String> affectedRoomIds,
+    List<String> affectedZoneIds,
     String reason
 ) {
 
@@ -27,6 +29,8 @@ public record TopologyChanged(
         changeKinds = Set.copyOf(Objects.requireNonNull(changeKinds, "changeKinds is required"));
         affectedDeviceIds = List.copyOf(Objects.requireNonNull(affectedDeviceIds, "affectedDeviceIds is required"));
         affectedEndpointIds = List.copyOf(Objects.requireNonNull(affectedEndpointIds, "affectedEndpointIds is required"));
+        affectedRoomIds = List.copyOf(Objects.requireNonNull(affectedRoomIds, "affectedRoomIds is required"));
+        affectedZoneIds = List.copyOf(Objects.requireNonNull(affectedZoneIds, "affectedZoneIds is required"));
         Objects.requireNonNull(reason, "reason is required");
     }
 }

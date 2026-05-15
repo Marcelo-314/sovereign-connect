@@ -5,11 +5,18 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sovereign.connect.core.topology.event.TopologyChangeKind;
 import com.sovereign.connect.core.topology.model.BaseTopologySnapshot;
+import com.sovereign.connect.core.topology.model.DeviceNode;
 import com.sovereign.connect.core.topology.model.EndpointHealth;
+import com.sovereign.connect.core.topology.model.EndpointNode;
 import com.sovereign.connect.core.topology.model.HabitatBaseTopology;
 import com.sovereign.connect.core.topology.model.HealthStatus;
+import com.sovereign.connect.core.topology.model.RoomNode;
+import com.sovereign.connect.core.topology.model.TopologySpatialEntityType;
+import com.sovereign.connect.core.topology.model.TopologySpatialRelation;
+import com.sovereign.connect.core.topology.model.TopologySpatialRelationKind;
 import com.sovereign.connect.core.topology.model.TopologyMutationRecord;
 import com.sovereign.connect.core.topology.model.TopologyVersion;
+import com.sovereign.connect.core.topology.model.ZoneNode;
 import com.sovereign.connect.core.topology.port.BaseTopologyRepository;
 import com.sovereign.connect.core.topology.port.CoreSnapshotReadPort;
 import com.sovereign.connect.core.topology.port.EndpointHealthWritePort;
@@ -202,6 +209,86 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSna
         return results.stream().findFirst();
     }
 
+    @Override
+    public Optional<RoomNode> findRoom(String habitatId, String roomId) {
+        Objects.requireNonNull(roomId, "roomId is required");
+        return findByHabitatId(habitatId)
+            .flatMap(topology -> topology.rooms().stream()
+                .filter(room -> room.roomId().equals(roomId))
+                .findFirst());
+    }
+
+    @Override
+    public Optional<ZoneNode> findZone(String habitatId, String zoneId) {
+        Objects.requireNonNull(zoneId, "zoneId is required");
+        return findByHabitatId(habitatId)
+            .flatMap(topology -> topology.zones().stream()
+                .filter(zone -> zone.zoneId().equals(zoneId))
+                .findFirst());
+    }
+
+    @Override
+    public Optional<TopologySpatialRelation> findSpatialRelation(String habitatId, String relationId) {
+        Objects.requireNonNull(relationId, "relationId is required");
+        return findByHabitatId(habitatId)
+            .flatMap(topology -> topology.spatialRelations().stream()
+                .filter(relation -> relation.relationId().equals(relationId))
+                .findFirst());
+    }
+
+    @Override
+    public List<TopologySpatialRelation> findSpatialRelationsBySubject(
+        String habitatId,
+        TopologySpatialEntityType type,
+        String id
+    ) {
+        Objects.requireNonNull(type, "type is required");
+        Objects.requireNonNull(id, "id is required");
+        return findByHabitatId(habitatId)
+            .map(topology -> topology.spatialRelations().stream()
+                .filter(relation -> relation.subject().type() == type)
+                .filter(relation -> relation.subject().id().equals(id))
+                .toList())
+            .orElse(List.of());
+    }
+
+    @Override
+    public List<DeviceNode> findLocatedDevices(String habitatId, String roomOrZoneId) {
+        Objects.requireNonNull(roomOrZoneId, "roomOrZoneId is required");
+        return findByHabitatId(habitatId)
+            .map(topology -> topology.devices().stream()
+                .filter(device -> isDeviceLocatedIn(topology, device, roomOrZoneId))
+                .toList())
+            .orElse(List.of());
+    }
+
+    @Override
+    public List<EndpointNode> findLocatedEndpoints(String habitatId, String roomOrZoneId) {
+        Objects.requireNonNull(roomOrZoneId, "roomOrZoneId is required");
+        return findByHabitatId(habitatId)
+            .map(topology -> topology.endpoints().stream()
+                .filter(endpoint -> isEndpointLocatedIn(topology, endpoint, roomOrZoneId))
+                .toList())
+            .orElse(List.of());
+    }
+
+    @Override
+    public Optional<TopologySpatialRelation> resolvePrimaryPlacement(
+        String habitatId,
+        TopologySpatialEntityType type,
+        String id
+    ) {
+        Objects.requireNonNull(type, "type is required");
+        Objects.requireNonNull(id, "id is required");
+        return findByHabitatId(habitatId)
+            .flatMap(topology -> topology.spatialRelations().stream()
+                .filter(relation -> relation.kind() == TopologySpatialRelationKind.LOCATED_IN)
+                .filter(TopologySpatialRelation::primary)
+                .filter(relation -> relation.subject().type() == type)
+                .filter(relation -> relation.subject().id().equals(id))
+                .findFirst());
+    }
+
     private void createSchema() {
         jdbcTemplate.execute(
             """
@@ -250,6 +337,26 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSna
                 )
                 """
         );
+    }
+
+    private boolean isDeviceLocatedIn(HabitatBaseTopology topology, DeviceNode device, String roomOrZoneId) {
+        boolean relationMatch = topology.spatialRelations().stream()
+            .filter(relation -> relation.kind() == TopologySpatialRelationKind.LOCATED_IN)
+            .filter(TopologySpatialRelation::primary)
+            .filter(relation -> relation.subject().type() == TopologySpatialEntityType.DEVICE)
+            .filter(relation -> relation.subject().id().equals(device.deviceId()))
+            .anyMatch(relation -> relation.target().id().equals(roomOrZoneId));
+        return relationMatch || device.roomId().equals(roomOrZoneId) || device.zoneId().equals(roomOrZoneId);
+    }
+
+    private boolean isEndpointLocatedIn(HabitatBaseTopology topology, EndpointNode endpoint, String roomOrZoneId) {
+        boolean relationMatch = topology.spatialRelations().stream()
+            .filter(relation -> relation.kind() == TopologySpatialRelationKind.LOCATED_IN)
+            .filter(TopologySpatialRelation::primary)
+            .filter(relation -> relation.subject().type() == TopologySpatialEntityType.ENDPOINT)
+            .filter(relation -> relation.subject().id().equals(endpoint.endpointId()))
+            .anyMatch(relation -> relation.target().id().equals(roomOrZoneId));
+        return relationMatch || endpoint.roomId().equals(roomOrZoneId) || endpoint.zoneId().equals(roomOrZoneId);
     }
 
     private BaseTopologySnapshot toSnapshot(ResultSet rs) throws SQLException {
