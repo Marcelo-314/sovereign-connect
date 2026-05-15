@@ -13,6 +13,7 @@ import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.port.BaseTopologyRepository;
 import com.sovereign.connect.core.topology.port.CoreSnapshotReadPort;
 import com.sovereign.connect.core.topology.port.EndpointHealthWritePort;
+import com.sovereign.connect.core.topology.port.TopologyMaterializationStatePort;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
@@ -31,7 +32,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSnapshotReadPort, EndpointHealthWritePort {
+public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSnapshotReadPort, EndpointHealthWritePort, TopologyMaterializationStatePort {
 
     private static final TypeReference<Map<String, Object>> STATE_TYPE = new TypeReference<>() {
     };
