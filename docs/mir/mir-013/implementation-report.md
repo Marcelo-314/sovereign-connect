@@ -83,7 +83,7 @@ mvn test
 Result:
 
 ```text
-Tests run: 48
+Tests run: 54
 Failures: 0
 Errors: 0
 Skipped: 0
@@ -127,7 +127,7 @@ BUILD SUCCESS
 | AC-031 | PASS | `H2BaseTopologyRepository.save(...)` remains structural-only. |
 | AC-032 | PASS | Materializer still uses `TopologyMaterializationStatePort`; no H2 import/field/constructor. |
 | AC-033 | PASS | Pre-existing 28 tests pass. |
-| AC-034 | PASS | `RoomZoneTopologySeedTest` adds 20 tests covering room, zone, LOCATED_IN, mismatch rejection, query, recovery and boundaries. |
+| AC-034 | PASS | `RoomZoneTopologySeedTest` adds 20 tests and `BaseTopologyServiceTest` adds 6 validateTopology coherence tests covering room, zone, LOCATED_IN, mismatch rejection, query, recovery and boundaries. |
 | AC-035 | PASS | `mvn test` succeeds locally. |
 
 ## 6. Boundary verification
@@ -147,6 +147,26 @@ No Hub/Surface/MCP: PASS
 H2BaseTopologyRepository.save(...) remains structural-only: PASS
 No endpoint_health/device_states side effects from structural save: PASS
 State/health writes still do not advance topologyVersion: PASS
+```
+
+## 7.1 validateTopology coherence patch
+
+```text
+ISSUE-CODE-001 closed: device/endpoint zoneId must belong to the same roomId declared by the device/endpoint.
+ISSUE-CODE-002 closed: every zone listed by room.zoneIds must point back through zone.roomId.
+ISSUE-CODE-003 closed: endpoint roomId/zoneId must match parent device roomId/zoneId; split-placement remains deferred.
+ISSUE-CODE-004 closed: room/zone deviceIds and endpointIds secondary indices must point back through device/endpoint roomId/zoneId.
+```
+
+Regression coverage added in `BaseTopologyServiceTest`:
+
+```text
+deviceRoomZoneMismatchRejected
+endpointRoomZoneMismatchRejected
+roomZoneListBidirectionalMismatchRejected
+endpointRoomMismatchWithParentDeviceRejected
+roomDeviceListBidirectionalMismatchRejected
+zoneEndpointListBidirectionalMismatchRejected
 ```
 
 ## 8. MU-012 preservation

@@ -227,6 +227,223 @@ class BaseTopologyServiceTest {
         });
     }
 
+    @Test
+    void deviceRoomZoneMismatchRejected() {
+        RoomNode living = new RoomNode("room.living", "Living", List.of(), List.of(), List.of(), new RoomTraits(false, false));
+        RoomNode kitchen = new RoomNode("room.kitchen", "Kitchen", List.of("zone.kitchen.worktop"), List.of(), List.of(), new RoomTraits(false, false));
+        ZoneNode worktop = new ZoneNode("zone.kitchen.worktop", "Kitchen Worktop", "room.kitchen", List.of(), List.of(), new ZoneTraits(false));
+        DeviceNode badDevice = new DeviceNode(
+            "device.light.kitchen-main",
+            "alias",
+            "Kitchen Main Light",
+            "room.living",
+            "zone.kitchen.worktop",
+            DeviceKind.LIGHT,
+            DeviceProvider.TUYA,
+            List.of(),
+            List.of(),
+            new DeviceTraits(false, false, true),
+            new DeviceHealth(HealthStatus.UNKNOWN, Instant.parse("2026-05-09T12:00:00Z"), "ok"),
+            new ProviderDeviceRef("tuya", "tuya.device.abc", Map.of())
+        );
+
+        assertThatThrownBy(() -> service.createInitialTopology(
+            "habitat-001",
+            List.of(living, kitchen),
+            List.of(worktop),
+            List.of(badDevice),
+            List.of()
+        )).isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("zone.roomId must equal device.roomId");
+    }
+
+    @Test
+    void endpointRoomZoneMismatchRejected() {
+        RoomNode living = new RoomNode("room.living", "Living", List.of(), List.of(), List.of(), new RoomTraits(false, false));
+        RoomNode kitchen = new RoomNode("room.kitchen", "Kitchen", List.of("zone.kitchen.worktop"), List.of(), List.of(), new RoomTraits(false, false));
+        ZoneNode worktop = new ZoneNode("zone.kitchen.worktop", "Kitchen Worktop", "room.kitchen", List.of(), List.of(), new ZoneTraits(false));
+        DeviceNode device = new DeviceNode(
+            "device.sensor.kitchen",
+            "alias",
+            "Kitchen Sensor",
+            "room.kitchen",
+            "zone.kitchen.worktop",
+            DeviceKind.SENSOR,
+            DeviceProvider.TUYA,
+            List.of("endpoint.sensor.kitchen-main"),
+            List.of(),
+            new DeviceTraits(false, false, false),
+            new DeviceHealth(HealthStatus.UNKNOWN, Instant.parse("2026-05-09T12:00:00Z"), "ok"),
+            new ProviderDeviceRef("tuya", "tuya.device.xyz", Map.of())
+        );
+        EndpointNode badEndpoint = new EndpointNode(
+            "endpoint.sensor.kitchen-main",
+            "device.sensor.kitchen",
+            "kitchen-main",
+            "endpoint.sensor.kitchen-main",
+            EndpointKind.SENSOR,
+            "room.living",
+            "zone.kitchen.worktop",
+            List.of(),
+            new EndpointTraits(false, false, false, false, false, false),
+            new EndpointHealth(HealthStatus.UNKNOWN, Instant.parse("2026-05-09T12:00:00Z"), "ok"),
+            new ProviderEndpointRef("tuya", "tuya.device.xyz", "tuya.dp.1", Map.of()),
+            EndpointMetadata.empty()
+        );
+
+        assertThatThrownBy(() -> service.createInitialTopology(
+            "habitat-001",
+            List.of(living, kitchen),
+            List.of(worktop),
+            List.of(device),
+            List.of(badEndpoint)
+        )).isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("zone.roomId must equal endpoint.roomId");
+    }
+
+    @Test
+    void roomZoneListBidirectionalMismatchRejected() {
+        RoomNode living = new RoomNode("room.living", "Living", List.of("zone.kitchen.worktop"), List.of(), List.of(), new RoomTraits(false, false));
+        RoomNode kitchen = new RoomNode("room.kitchen", "Kitchen", List.of(), List.of(), List.of(), new RoomTraits(false, false));
+        ZoneNode worktop = new ZoneNode("zone.kitchen.worktop", "Worktop", "room.kitchen", List.of(), List.of(), new ZoneTraits(false));
+
+        assertThatThrownBy(() -> service.createInitialTopology(
+            "habitat-001",
+            List.of(living, kitchen),
+            List.of(worktop),
+            List.of(),
+            List.of()
+        )).isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("zone.roomId == room.roomId");
+    }
+
+    @Test
+    void endpointRoomMismatchWithParentDeviceRejected() {
+        RoomNode living = new RoomNode("room.living", "Living", List.of("zone.living.corner"), List.of(), List.of(), new RoomTraits(false, false));
+        RoomNode kitchen = new RoomNode("room.kitchen", "Kitchen", List.of("zone.kitchen.worktop"), List.of("device.sensor.kitchen"), List.of(), new RoomTraits(false, false));
+        ZoneNode corner = new ZoneNode("zone.living.corner", "Living Corner", "room.living", List.of(), List.of(), new ZoneTraits(false));
+        ZoneNode worktop = new ZoneNode("zone.kitchen.worktop", "Kitchen Worktop", "room.kitchen", List.of("device.sensor.kitchen"), List.of(), new ZoneTraits(false));
+        DeviceNode device = new DeviceNode(
+            "device.sensor.kitchen",
+            "alias",
+            "Kitchen Sensor",
+            "room.kitchen",
+            "zone.kitchen.worktop",
+            DeviceKind.SENSOR,
+            DeviceProvider.TUYA,
+            List.of("endpoint.sensor.kitchen-main"),
+            List.of(),
+            new DeviceTraits(false, false, false),
+            new DeviceHealth(HealthStatus.UNKNOWN, Instant.parse("2026-05-09T12:00:00Z"), "ok"),
+            new ProviderDeviceRef("tuya", "tuya.device.xyz", Map.of())
+        );
+        EndpointNode badEndpoint = new EndpointNode(
+            "endpoint.sensor.kitchen-main",
+            "device.sensor.kitchen",
+            "kitchen-main",
+            "endpoint.sensor.kitchen-main",
+            EndpointKind.SENSOR,
+            "room.living",
+            "zone.living.corner",
+            List.of(),
+            new EndpointTraits(false, false, false, false, false, false),
+            new EndpointHealth(HealthStatus.UNKNOWN, Instant.parse("2026-05-09T12:00:00Z"), "ok"),
+            new ProviderEndpointRef("tuya", "tuya.device.xyz", "tuya.dp.1", Map.of()),
+            EndpointMetadata.empty()
+        );
+
+        assertThatThrownBy(() -> service.createInitialTopology(
+            "habitat-001",
+            List.of(living, kitchen),
+            List.of(corner, worktop),
+            List.of(device),
+            List.of(badEndpoint)
+        )).isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("split-placement deferred");
+    }
+
+    @Test
+    void roomDeviceListBidirectionalMismatchRejected() {
+        RoomNode living = new RoomNode("room.living", "Living", List.of(), List.of("device.sensor.kitchen"), List.of(), new RoomTraits(false, false));
+        RoomNode kitchen = new RoomNode("room.kitchen", "Kitchen", List.of("zone.kitchen.worktop"), List.of(), List.of(), new RoomTraits(false, false));
+        ZoneNode worktop = new ZoneNode("zone.kitchen.worktop", "Worktop", "room.kitchen", List.of("device.sensor.kitchen"), List.of(), new ZoneTraits(false));
+        DeviceNode device = new DeviceNode(
+            "device.sensor.kitchen",
+            "alias",
+            "Kitchen Sensor",
+            "room.kitchen",
+            "zone.kitchen.worktop",
+            DeviceKind.SENSOR,
+            DeviceProvider.TUYA,
+            List.of(),
+            List.of(),
+            new DeviceTraits(false, false, false),
+            new DeviceHealth(HealthStatus.UNKNOWN, Instant.parse("2026-05-09T12:00:00Z"), "ok"),
+            new ProviderDeviceRef("tuya", "tuya.device.xyz", Map.of())
+        );
+
+        assertThatThrownBy(() -> service.createInitialTopology(
+            "habitat-001",
+            List.of(living, kitchen),
+            List.of(worktop),
+            List.of(device),
+            List.of()
+        )).isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("device.roomId == room.roomId");
+    }
+
+    @Test
+    void zoneEndpointListBidirectionalMismatchRejected() {
+        RoomNode living = new RoomNode("room.living", "Living", List.of("zone.living.corner"), List.of(), List.of(), new RoomTraits(false, false));
+        RoomNode kitchen = new RoomNode(
+            "room.kitchen",
+            "Kitchen",
+            List.of("zone.kitchen.worktop"),
+            List.of("device.light.kitchen"),
+            List.of("endpoint.light.kitchen-main"),
+            new RoomTraits(false, false)
+        );
+        ZoneNode corner = new ZoneNode("zone.living.corner", "Living Corner", "room.living", List.of(), List.of("endpoint.light.kitchen-main"), new ZoneTraits(false));
+        ZoneNode worktop = new ZoneNode("zone.kitchen.worktop", "Kitchen Worktop", "room.kitchen", List.of("device.light.kitchen"), List.of(), new ZoneTraits(false));
+        DeviceNode device = new DeviceNode(
+            "device.light.kitchen",
+            "alias",
+            "Kitchen Light",
+            "room.kitchen",
+            "zone.kitchen.worktop",
+            DeviceKind.LIGHT,
+            DeviceProvider.TUYA,
+            List.of("endpoint.light.kitchen-main"),
+            List.of(),
+            new DeviceTraits(false, false, true),
+            new DeviceHealth(HealthStatus.UNKNOWN, Instant.parse("2026-05-09T12:00:00Z"), "ok"),
+            new ProviderDeviceRef("tuya", "tuya.device.xyz", Map.of())
+        );
+        EndpointNode endpoint = new EndpointNode(
+            "endpoint.light.kitchen-main",
+            "device.light.kitchen",
+            "kitchen-main",
+            "endpoint.light.kitchen-main",
+            EndpointKind.LIGHT,
+            "room.kitchen",
+            "zone.kitchen.worktop",
+            List.of(),
+            new EndpointTraits(true, true, true, true, false, false),
+            new EndpointHealth(HealthStatus.UNKNOWN, Instant.parse("2026-05-09T12:00:00Z"), "ok"),
+            new ProviderEndpointRef("tuya", "tuya.device.xyz", "tuya.dp.1", Map.of()),
+            EndpointMetadata.empty()
+        );
+
+        assertThatThrownBy(() -> service.createInitialTopology(
+            "habitat-001",
+            List.of(living, kitchen),
+            List.of(corner, worktop),
+            List.of(device),
+            List.of(endpoint)
+        )).isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("endpoint.zoneId == zone.zoneId");
+    }
+
     private RoomNode room() {
         return room(List.of("endpoint.light.kitchen-main", "endpoint.sensor.kitchen-motion"));
     }
