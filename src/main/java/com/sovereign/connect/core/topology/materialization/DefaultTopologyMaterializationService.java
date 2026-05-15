@@ -1,6 +1,5 @@
 package com.sovereign.connect.core.topology.materialization;
 
-import com.sovereign.connect.adapter.persistence.H2BaseTopologyRepository;
 import com.sovereign.connect.core.topology.event.TopologyChanged;
 import com.sovereign.connect.core.topology.model.CapabilityKind;
 import com.sovereign.connect.core.topology.model.CapabilityNode;
@@ -23,6 +22,7 @@ import com.sovereign.connect.core.topology.model.RoomNode;
 import com.sovereign.connect.core.topology.model.TopologyMutationResult;
 import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.model.ZoneNode;
+import com.sovereign.connect.core.topology.port.TopologyMaterializationStatePort;
 import com.sovereign.connect.core.topology.service.BaseTopologyService;
 
 import java.time.Clock;
@@ -37,18 +37,18 @@ import java.util.function.Predicate;
 public class DefaultTopologyMaterializationService implements TopologyMaterializationService {
 
     private final BaseTopologyService baseTopologyService;
-    private final H2BaseTopologyRepository repository;
+    private final TopologyMaterializationStatePort statePort;
     private final Predicate<String> admittedAdapterPredicate;
     private final Clock clock;
 
     public DefaultTopologyMaterializationService(
         BaseTopologyService baseTopologyService,
-        H2BaseTopologyRepository repository,
+        TopologyMaterializationStatePort statePort,
         Predicate<String> admittedAdapterPredicate,
         Clock clock
     ) {
         this.baseTopologyService = Objects.requireNonNull(baseTopologyService, "baseTopologyService is required");
-        this.repository = Objects.requireNonNull(repository, "repository is required");
+        this.statePort = Objects.requireNonNull(statePort, "statePort is required");
         this.admittedAdapterPredicate = Objects.requireNonNull(admittedAdapterPredicate, "admittedAdapterPredicate is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
     }
@@ -155,7 +155,7 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
 
         int before = baseTopologyService.emittedEvents().size();
         TopologyMutationResult result = baseTopologyService.addEndpointWithResult(habitatId, endpoint);
-        repository.saveEndpointHealth(habitatId, endpointId, initialHealth);
+        statePort.saveEndpointHealth(habitatId, endpointId, initialHealth);
         return acceptStructural(habitatId, fact, result, eventDelta(before), "endpoint materialized");
     }
 
@@ -202,7 +202,7 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
             return rejectInvalid(habitatId, fact, "device not found");
         }
         TopologyVersion version = topology.get().topologyVersion();
-        repository.saveDeviceState(habitatId, deviceId, fact.statePayload());
+        statePort.saveDeviceState(habitatId, deviceId, fact.statePayload());
         return decision(
             habitatId,
             fact,
@@ -227,7 +227,7 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
             return rejectInvalid(habitatId, fact, "endpoint not found");
         }
         TopologyVersion version = topology.get().topologyVersion();
-        repository.saveEndpointHealth(
+        statePort.saveEndpointHealth(
             habitatId,
             endpointId,
             new EndpointHealth(fact.healthStatus(), fact.observedAt(), fact.healthReason())
@@ -247,7 +247,7 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
         if (!admittedAdapterPredicate.test(fact.adapterInstanceId())) {
             return Optional.empty();
         }
-        return repository.findByHabitatId(habitatId);
+        return statePort.findByHabitatId(habitatId);
     }
 
     private MaterializationDecision rejectedByPrecondition(String habitatId, TopologyFact fact) {
@@ -256,8 +256,8 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
                 habitatId,
                 fact,
                 MaterializationDecisionKind.REJECT_UNAUTHORIZED_ADAPTER,
-                repository.findCurrentVersion(habitatId),
-                repository.findCurrentVersion(habitatId),
+                statePort.findCurrentVersion(habitatId),
+                statePort.findCurrentVersion(habitatId),
                 List.of(),
                 "adapter not admitted"
             );
@@ -266,7 +266,7 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
     }
 
     private MaterializationDecision rejectDuplicate(String habitatId, TopologyFact fact) {
-        Optional<TopologyVersion> version = repository.findCurrentVersion(habitatId);
+        Optional<TopologyVersion> version = statePort.findCurrentVersion(habitatId);
         return decision(
             habitatId,
             fact,
@@ -279,7 +279,7 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
     }
 
     private MaterializationDecision rejectInvalid(String habitatId, TopologyFact fact, String reason) {
-        Optional<TopologyVersion> version = repository.findCurrentVersion(habitatId);
+        Optional<TopologyVersion> version = statePort.findCurrentVersion(habitatId);
         return decision(
             habitatId,
             fact,

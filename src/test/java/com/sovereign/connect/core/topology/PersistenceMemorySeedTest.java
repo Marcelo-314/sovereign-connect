@@ -2,6 +2,7 @@ package com.sovereign.connect.core.topology;
 
 import com.sovereign.connect.adapter.persistence.H2BaseTopologyRepository;
 import com.sovereign.connect.core.topology.event.TopologyChangeKind;
+import com.sovereign.connect.core.topology.materialization.DefaultTopologyMaterializationService;
 import com.sovereign.connect.core.topology.model.BaseTopologySnapshot;
 import com.sovereign.connect.core.topology.model.CapabilityKind;
 import com.sovereign.connect.core.topology.model.CapabilityNode;
@@ -30,6 +31,7 @@ import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.model.ZoneNode;
 import com.sovereign.connect.core.topology.model.ZoneTraits;
 import com.sovereign.connect.core.topology.port.BaseTopologyRepository;
+import com.sovereign.connect.core.topology.port.TopologyMaterializationStatePort;
 import com.sovereign.connect.core.topology.service.BaseTopologyService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -150,6 +152,17 @@ class PersistenceMemorySeedTest {
             .contains("save", "findByHabitatId", "findCurrentVersion");
         assertThat(Arrays.stream(BaseTopologyService.class.getConstructors()).map(this::constructorSurface).toList())
             .noneMatch(surface -> surface.contains("H2BaseTopologyRepository"));
+        assertThat(Arrays.stream(DefaultTopologyMaterializationService.class.getDeclaredFields())
+            .map(field -> field.getType().getName())
+            .toList())
+            .noneMatch(type -> type.contains("H2BaseTopologyRepository"));
+        assertThat(Arrays.stream(DefaultTopologyMaterializationService.class.getConstructors())
+            .map(this::constructorSurface)
+            .toList())
+            .noneMatch(surface -> surface.contains("H2BaseTopologyRepository"));
+        assertThat(H2BaseTopologyRepository.class.getInterfaces())
+            .extracting(Class::getSimpleName)
+            .contains(TopologyMaterializationStatePort.class.getSimpleName());
         assertThat(Arrays.stream(H2BaseTopologyRepository.class.getDeclaredFields())
             .map(field -> field.getType().getName().toLowerCase() + " " + field.getName().toLowerCase())
             .toList())
