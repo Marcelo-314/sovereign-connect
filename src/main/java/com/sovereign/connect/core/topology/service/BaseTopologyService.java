@@ -34,6 +34,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 public class BaseTopologyService {
 
@@ -640,17 +642,43 @@ public class BaseTopologyService {
         Set<String> endpointIds = new HashSet<>(topology.endpoints().stream().map(EndpointNode::endpointId).toList());
         Set<String> roomIds = new HashSet<>(topology.rooms().stream().map(RoomNode::roomId).toList());
         Set<String> zoneIds = new HashSet<>(topology.zones().stream().map(ZoneNode::zoneId).toList());
+        Map<String, RoomNode> roomsById = topology.rooms().stream()
+            .collect(Collectors.toMap(RoomNode::roomId, Function.identity()));
+        Map<String, ZoneNode> zonesById = topology.zones().stream()
+            .collect(Collectors.toMap(ZoneNode::zoneId, Function.identity()));
+        Map<String, DeviceNode> devicesById = topology.devices().stream()
+            .collect(Collectors.toMap(DeviceNode::deviceId, Function.identity()));
+        Map<String, EndpointNode> endpointsById = topology.endpoints().stream()
+            .collect(Collectors.toMap(EndpointNode::endpointId, Function.identity()));
 
         for (RoomNode room : topology.rooms()) {
             ensureCanonicalId(room);
             if (!zoneIds.containsAll(room.zoneIds())) {
                 throw new IllegalArgumentException("room zoneIds must refer to ZoneNode zoneId values");
             }
+            for (String listedZoneId : room.zoneIds()) {
+                ZoneNode zone = zonesById.get(listedZoneId);
+                if (!zone.roomId().equals(room.roomId())) {
+                    throw new IllegalArgumentException("zone listed in room.zoneIds must have zone.roomId == room.roomId");
+                }
+            }
             if (!deviceIds.containsAll(room.deviceIds())) {
                 throw new IllegalArgumentException("room deviceIds must refer to DeviceNode deviceId values");
             }
+            for (String listedDeviceId : room.deviceIds()) {
+                DeviceNode device = devicesById.get(listedDeviceId);
+                if (!device.roomId().equals(room.roomId())) {
+                    throw new IllegalArgumentException("device listed in room.deviceIds must have device.roomId == room.roomId");
+                }
+            }
             if (!endpointIds.containsAll(room.endpointIds())) {
                 throw new IllegalArgumentException("room endpointIds must refer to EndpointNode endpointId values");
+            }
+            for (String listedEndpointId : room.endpointIds()) {
+                EndpointNode endpoint = endpointsById.get(listedEndpointId);
+                if (!endpoint.roomId().equals(room.roomId())) {
+                    throw new IllegalArgumentException("endpoint listed in room.endpointIds must have endpoint.roomId == room.roomId");
+                }
             }
         }
 
@@ -662,8 +690,20 @@ public class BaseTopologyService {
             if (!deviceIds.containsAll(zone.deviceIds())) {
                 throw new IllegalArgumentException("zone deviceIds must refer to DeviceNode deviceId values");
             }
+            for (String listedDeviceId : zone.deviceIds()) {
+                DeviceNode device = devicesById.get(listedDeviceId);
+                if (!device.zoneId().equals(zone.zoneId())) {
+                    throw new IllegalArgumentException("device listed in zone.deviceIds must have device.zoneId == zone.zoneId");
+                }
+            }
             if (!endpointIds.containsAll(zone.endpointIds())) {
                 throw new IllegalArgumentException("zone endpointIds must refer to EndpointNode endpointId values");
+            }
+            for (String listedEndpointId : zone.endpointIds()) {
+                EndpointNode endpoint = endpointsById.get(listedEndpointId);
+                if (!endpoint.zoneId().equals(zone.zoneId())) {
+                    throw new IllegalArgumentException("endpoint listed in zone.endpointIds must have endpoint.zoneId == zone.zoneId");
+                }
             }
         }
 
@@ -674,6 +714,9 @@ public class BaseTopologyService {
             }
             if (!zoneIds.contains(device.zoneId())) {
                 throw new IllegalArgumentException("device zoneId must refer to a ZoneNode");
+            }
+            if (!zonesById.get(device.zoneId()).roomId().equals(device.roomId())) {
+                throw new IllegalArgumentException("device zoneId zone.roomId must equal device.roomId");
             }
             if (device.deviceId().equals(device.providerRef().providerDeviceId())) {
                 throw new IllegalArgumentException("providerDeviceId must not be used as canonical deviceId");
@@ -694,6 +737,16 @@ public class BaseTopologyService {
             }
             if (!zoneIds.contains(endpoint.zoneId())) {
                 throw new IllegalArgumentException("endpoint zoneId must refer to a ZoneNode");
+            }
+            if (!zonesById.get(endpoint.zoneId()).roomId().equals(endpoint.roomId())) {
+                throw new IllegalArgumentException("endpoint zoneId zone.roomId must equal endpoint.roomId");
+            }
+            DeviceNode parentDevice = devicesById.get(endpoint.deviceId());
+            if (!endpoint.roomId().equals(parentDevice.roomId())) {
+                throw new IllegalArgumentException("endpoint roomId must equal parent device roomId (split-placement deferred)");
+            }
+            if (!endpoint.zoneId().equals(parentDevice.zoneId())) {
+                throw new IllegalArgumentException("endpoint zoneId must equal parent device zoneId (split-placement deferred)");
             }
             validateUnique("endpoint capabilityId", endpoint.capabilities().stream().map(CapabilityNode::capabilityId).toList());
         }
