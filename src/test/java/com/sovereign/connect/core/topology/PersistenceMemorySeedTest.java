@@ -159,10 +159,17 @@ class PersistenceMemorySeedTest {
         assertThat(Arrays.stream(DefaultTopologyMaterializationService.class.getConstructors())
             .map(this::constructorSurface)
             .toList())
+            .anyMatch(surface -> surface.contains("MaterializationDecisionReplayPort"));
+        assertThat(Arrays.stream(DefaultTopologyMaterializationService.class.getConstructors())
+            .map(this::constructorSurface)
+            .toList())
             .noneMatch(surface -> surface.contains("H2BaseTopologyRepository"));
         assertThat(H2BaseTopologyRepository.class.getInterfaces())
             .extracting(Class::getSimpleName)
             .contains(TopologyMaterializationStatePort.class.getSimpleName());
+        assertThat(H2BaseTopologyRepository.class.getInterfaces())
+            .extracting(Class::getSimpleName)
+            .contains("MaterializationDecisionReplayPort");
         assertThat(Arrays.stream(H2BaseTopologyRepository.class.getDeclaredFields())
             .map(field -> field.getType().getName().toLowerCase() + " " + field.getName().toLowerCase())
             .toList())
