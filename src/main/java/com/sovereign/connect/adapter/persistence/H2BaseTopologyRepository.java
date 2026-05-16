@@ -3,6 +3,10 @@ package com.sovereign.connect.adapter.persistence;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sovereign.connect.core.scledger.model.LedgerEntry;
+import com.sovereign.connect.core.scledger.model.OutboxEntry;
+import com.sovereign.connect.core.scledger.port.ScLedgerWritePort;
+import com.sovereign.connect.core.scledger.port.ScOutboxWritePort;
 import com.sovereign.connect.core.topology.event.TopologyChangeKind;
 import com.sovereign.connect.core.topology.event.TopologyChanged;
 import com.sovereign.connect.core.topology.materialization.MaterializationDecision;
@@ -43,7 +47,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSnapshotReadPort, EndpointHealthWritePort, TopologyMaterializationStatePort, MaterializationDecisionReplayPort {
+public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSnapshotReadPort, EndpointHealthWritePort, TopologyMaterializationStatePort, MaterializationDecisionReplayPort, ScLedgerWritePort, ScOutboxWritePort {
 
     private static final TypeReference<Map<String, Object>> STATE_TYPE = new TypeReference<>() {
     };
@@ -133,6 +137,60 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSna
             String.join(",", record.affectedEndpointIds()),
             record.reason(),
             Timestamp.from(record.acceptedAt())
+        );
+    }
+
+    @Override
+    public void appendLedgerEntry(LedgerEntry entry) {
+        Objects.requireNonNull(entry, "entry is required");
+        jdbcTemplate.update(
+            """
+                INSERT INTO sc_c_ledger_entries
+                (ledger_entry_id, habitat_id, record_class, aggregate_type, aggregate_id,
+                 semantic_kind, payload_type, payload_json, idempotency_key,
+                 recorded_at_ms, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            entry.ledgerEntryId().toString(),
+            entry.habitatId(),
+            entry.recordClass().name(),
+            entry.aggregateType(),
+            entry.aggregateId(),
+            entry.semanticKind().name(),
+            entry.payloadType(),
+            entry.payloadJson(),
+            entry.idempotencyKey(),
+            entry.recordedAt().toEpochMilli(),
+            entry.metadataJson()
+        );
+    }
+
+    @Override
+    public void appendOutboxEntry(OutboxEntry entry) {
+        Objects.requireNonNull(entry, "entry is required");
+        jdbcTemplate.update(
+            """
+                INSERT INTO sc_c_outbox_entries
+                (outbox_entry_id, ledger_entry_id, habitat_id, outbound_kind,
+                 delivery_lane, logical_topic, semantic_payload_json,
+                 notification_target_ref, idempotency_key, status,
+                 attempt_count, created_at_ms, updated_at_ms, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            entry.outboxEntryId().toString(),
+            entry.ledgerEntryId().toString(),
+            entry.habitatId(),
+            entry.outboundKind().name(),
+            entry.deliveryLane().name(),
+            entry.logicalTopic(),
+            entry.semanticPayloadJson(),
+            entry.notificationTargetRef(),
+            entry.idempotencyKey(),
+            entry.status().name(),
+            0,
+            entry.createdAt().toEpochMilli(),
+            entry.updatedAt().toEpochMilli(),
+            entry.metadataJson()
         );
     }
 
@@ -405,6 +463,72 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSna
                 )
                 """
         );
+        jdbcTemplate.execute(
+            """
+                CREATE TABLE IF NOT EXISTS sc_c_ledger_entries (
+                    ledger_entry_id VARCHAR(36) PRIMARY KEY,
+                    habitat_id VARCHAR(255) NOT NULL,
+                    record_class VARCHAR(64) NOT NULL,
+                    aggregate_type VARCHAR(128) NOT NULL,
+                    aggregate_id VARCHAR(255) NOT NULL,
+                    semantic_kind VARCHAR(128) NOT NULL,
+                    payload_type VARCHAR(255) NOT NULL,
+                    payload_json CLOB NOT NULL,
+                    idempotency_key VARCHAR(512) NOT NULL,
+                    recorded_at_ms BIGINT NOT NULL,
+                    metadata_json CLOB,
+                    CONSTRAINT uq_sc_c_ledger_entry_habitat
+                        UNIQUE (ledger_entry_id, habitat_id),
+                    CONSTRAINT uq_sc_c_ledger_idempotency
+                        UNIQUE (habitat_id, idempotency_key)
+                )
+                """
+        );
+        jdbcTemplate.execute(
+            """
+                CREATE INDEX IF NOT EXISTS ix_ledger_habitat_aggregate
+                ON sc_c_ledger_entries(habitat_id, aggregate_type, aggregate_id)
+                """
+        );
+        jdbcTemplate.execute(
+            """
+                CREATE TABLE IF NOT EXISTS sc_c_outbox_entries (
+                    outbox_entry_id VARCHAR(36) PRIMARY KEY,
+                    ledger_entry_id VARCHAR(36) NOT NULL,
+                    habitat_id VARCHAR(255) NOT NULL,
+                    outbound_kind VARCHAR(128) NOT NULL,
+                    delivery_lane VARCHAR(64) NOT NULL,
+                    logical_topic VARCHAR(255) NOT NULL,
+                    semantic_payload_json CLOB NOT NULL,
+                    notification_target_ref VARCHAR(512),
+                    idempotency_key VARCHAR(512) NOT NULL,
+                    status VARCHAR(64) NOT NULL
+                        CHECK(status IN ('PENDING','CLAIMED','DISPATCHED',
+                                         'DISPATCH_FAILED','RETRY_WAIT',
+                                         'DEAD_LETTERED','SUPPRESSED')),
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    claimed_at_ms BIGINT,
+                    claim_expires_at_ms BIGINT,
+                    claimed_by VARCHAR(255),
+                    expires_at_ms BIGINT,
+                    created_at_ms BIGINT NOT NULL,
+                    updated_at_ms BIGINT NOT NULL,
+                    metadata_json CLOB,
+                    CONSTRAINT fk_sc_c_outbox_ledger
+                        FOREIGN KEY (ledger_entry_id, habitat_id)
+                        REFERENCES sc_c_ledger_entries(ledger_entry_id, habitat_id),
+                    CONSTRAINT uq_sc_c_outbox_idempotency
+                        UNIQUE (habitat_id, idempotency_key)
+                )
+                """
+        );
+        jdbcTemplate.execute(
+            """
+                CREATE INDEX IF NOT EXISTS ix_outbox_status_created
+                ON sc_c_outbox_entries(habitat_id, status, created_at_ms)
+                """
+        );
+        jdbcTemplate.execute("SET REFERENTIAL_INTEGRITY TRUE");
     }
 
     private boolean isDeviceLocatedIn(HabitatBaseTopology topology, DeviceNode device, String roomOrZoneId) {
