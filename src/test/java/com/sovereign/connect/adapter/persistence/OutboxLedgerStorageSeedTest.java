@@ -369,6 +369,46 @@ class OutboxLedgerStorageSeedTest {
         }
     }
 
+    @Test
+    void nonPendingOutboxAppendRejected() {
+        String jdbcUrl = jdbcUrl("non-pending-outbox");
+        H2BaseTopologyRepository repository =
+            new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
+
+        UUID actId = UUID.randomUUID();
+        UUID ledgerEntryId = UUID.randomUUID();
+
+        LedgerEntry ledger = ledgerEntry(
+            ledgerEntryId,
+            "habitat-001",
+            actId.toString(),
+            SemanticKind.TEMPORAL_ACT_FIRED,
+            "temporal-act-fired:" + actId
+        );
+
+        repository.appendLedgerEntry(ledger);
+
+        OutboxEntry claimed = new OutboxEntry(
+            UUID.randomUUID(),
+            ledgerEntryId,
+            "habitat-001",
+            OutboundKind.TIMER_FIRED_SIGNAL,
+            DeliveryLane.SIGNAL,
+            "sc-c.timer-fired",
+            "{\"kind\":\"timer-fired\"}",
+            "surface:test",
+            "timer-fired-claimed:" + actId,
+            OutboxEntryStatus.CLAIMED,
+            Instant.parse("2026-05-16T12:00:00Z"),
+            Instant.parse("2026-05-16T12:00:00Z"),
+            null
+        );
+
+        assertThatThrownBy(() -> repository.appendOutboxEntry(claimed))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("PENDING");
+    }
+
     private LedgerEntry ledgerEntry(
         UUID ledgerEntryId,
         String habitatId,

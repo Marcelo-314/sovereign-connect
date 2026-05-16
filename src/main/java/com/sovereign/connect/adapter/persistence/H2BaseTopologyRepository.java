@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sovereign.connect.core.scledger.model.LedgerEntry;
 import com.sovereign.connect.core.scledger.model.OutboxEntry;
+import com.sovereign.connect.core.scledger.model.OutboxEntryStatus;
 import com.sovereign.connect.core.scledger.port.ScLedgerWritePort;
 import com.sovereign.connect.core.scledger.port.ScOutboxWritePort;
 import com.sovereign.connect.core.topology.event.TopologyChangeKind;
@@ -168,6 +169,12 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSna
     @Override
     public void appendOutboxEntry(OutboxEntry entry) {
         Objects.requireNonNull(entry, "entry is required");
+        if (entry.status() != OutboxEntryStatus.PENDING) {
+            throw new IllegalArgumentException(
+                "appendOutboxEntry accepts only PENDING outbox entries in this seed; "
+                    + "status transitions are not implemented in MU-015: " + entry.status()
+            );
+        }
         jdbcTemplate.update(
             """
                 INSERT INTO sc_c_outbox_entries
