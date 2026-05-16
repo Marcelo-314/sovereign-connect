@@ -32,6 +32,7 @@ import com.sovereign.connect.core.topology.model.TopologySpatialTarget;
 import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.model.ZoneNode;
 import com.sovereign.connect.core.topology.model.ZoneTraits;
+import com.sovereign.connect.core.topology.port.MaterializationDecisionReplayPort;
 import com.sovereign.connect.core.topology.port.TopologyMaterializationStatePort;
 import com.sovereign.connect.core.topology.service.BaseTopologyService;
 
@@ -49,24 +50,31 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
     private final BaseTopologyService baseTopologyService;
     private final TopologyMaterializationStatePort statePort;
     private final Predicate<String> admittedAdapterPredicate;
+    private final MaterializationDecisionReplayPort replayPort;
     private final Clock clock;
 
     public DefaultTopologyMaterializationService(
         BaseTopologyService baseTopologyService,
         TopologyMaterializationStatePort statePort,
         Predicate<String> admittedAdapterPredicate,
+        MaterializationDecisionReplayPort replayPort,
         Clock clock
     ) {
         this.baseTopologyService = Objects.requireNonNull(baseTopologyService, "baseTopologyService is required");
         this.statePort = Objects.requireNonNull(statePort, "statePort is required");
         this.admittedAdapterPredicate = Objects.requireNonNull(admittedAdapterPredicate, "admittedAdapterPredicate is required");
+        this.replayPort = Objects.requireNonNull(replayPort, "replayPort is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
     }
 
     @Override
     public MaterializationDecision materialize(String habitatId, TopologyFact fact) {
         Objects.requireNonNull(fact, "fact is required");
-        return switch (fact) {
+        Optional<MaterializationDecision> replayed = replayPort.findDecision(habitatId, fact.factId());
+        if (replayed.isPresent()) {
+            return replayed.get();
+        }
+        MaterializationDecision decision = switch (fact) {
             case DeviceDiscoveryFact f -> materializeDevice(habitatId, f);
             case EndpointDiscoveryFact f -> materializeEndpoint(habitatId, f);
             case CapabilityDiscoveryFact f -> materializeCapability(habitatId, f);
@@ -75,6 +83,8 @@ public class DefaultTopologyMaterializationService implements TopologyMaterializ
             case RoomDiscoveryFact f -> materializeRoom(habitatId, f);
             case ZoneDiscoveryFact f -> materializeZone(habitatId, f);
         };
+        replayPort.recordDecision(habitatId, fact.factId(), decision);
+        return decision;
     }
 
     public String canonicalDeviceId(String providerId, String providerDeviceId) {

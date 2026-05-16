@@ -59,6 +59,7 @@ class TopologyMaterializationSeedTest {
             mutationService,
             repository,
             adapterInstanceId -> true,
+            repository,
             clock
         );
 
@@ -89,7 +90,10 @@ class TopologyMaterializationSeedTest {
         assertThat(materializedDevice.providerRef().providerDeviceId())
             .isNotEqualTo(materializedDevice.deviceId());
 
-        MaterializationDecision duplicateDevice = materializationService.materialize("habitat-007", deviceFact);
+        MaterializationDecision duplicateDevice = materializationService.materialize("habitat-007", deviceFactWithId(
+            UUID.fromString("00000000-0000-0000-0000-000000000101"),
+            "adapter-1"
+        ));
         assertRejectedWithoutMutation(duplicateDevice, MaterializationDecisionKind.REJECT_DUPLICATE, deviceDecision.resultingTopologyVersion().orElseThrow(), queryService);
 
         MaterializationDecision conflictingProviderBinding = materializationService.materialize(
@@ -123,14 +127,20 @@ class TopologyMaterializationSeedTest {
         assertThat(materializedEndpoint.providerRef().providerEndpointId())
             .isNotEqualTo(materializedEndpoint.endpointId());
 
-        MaterializationDecision duplicateEndpoint = materializationService.materialize("habitat-007", endpointFact);
+        MaterializationDecision duplicateEndpoint = materializationService.materialize("habitat-007", endpointFactWithId(
+            UUID.fromString("00000000-0000-0000-0000-000000000103"),
+            "adapter-1"
+        ));
         assertRejectedWithoutMutation(duplicateEndpoint, MaterializationDecisionKind.REJECT_DUPLICATE, endpointDecision.resultingTopologyVersion().orElseThrow(), queryService);
 
         MaterializationDecision capabilityDecision = materializationService.materialize("habitat-007", capabilityFact);
         assertStructuralDecision(capabilityDecision, TopologyChangeKind.CAPABILITY_ADDED, canonicalDeviceId, canonicalEndpointId);
         assertThat(canonicalCapabilityId).isNotEqualTo(capabilityFact.providerCapabilityKey());
 
-        MaterializationDecision duplicateCapability = materializationService.materialize("habitat-007", capabilityFact);
+        MaterializationDecision duplicateCapability = materializationService.materialize("habitat-007", capabilityFactWithId(
+            UUID.fromString("00000000-0000-0000-0000-000000000104"),
+            "adapter-1"
+        ));
         assertRejectedWithoutMutation(duplicateCapability, MaterializationDecisionKind.REJECT_DUPLICATE, capabilityDecision.resultingTopologyVersion().orElseThrow(), queryService);
 
         TopologyVersion versionBeforeState = queryService.findCurrentTopologyVersion("habitat-007").orElseThrow();
@@ -192,6 +202,7 @@ class TopologyMaterializationSeedTest {
             mutationService,
             repository,
             adapterInstanceId -> false,
+            repository,
             clock
         );
         MaterializationDecision denied = deniedMaterializer.materialize(
@@ -267,6 +278,7 @@ class TopologyMaterializationSeedTest {
                 mutationService,
                 repository,
                 id -> true,
+                repository,
                 clock
             );
 
@@ -413,8 +425,12 @@ class TopologyMaterializationSeedTest {
     }
 
     private DeviceDiscoveryFact deviceFact(String adapterInstanceId) {
+        return deviceFactWithId(UUID.fromString("00000000-0000-0000-0000-000000000001"), adapterInstanceId);
+    }
+
+    private DeviceDiscoveryFact deviceFactWithId(UUID factId, String adapterInstanceId) {
         return new DeviceDiscoveryFact(
-            UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            factId,
             adapterInstanceId,
             "tuya",
             "tuya-device-abc",
@@ -430,8 +446,12 @@ class TopologyMaterializationSeedTest {
     }
 
     private EndpointDiscoveryFact endpointFact(String adapterInstanceId) {
+        return endpointFactWithId(UUID.fromString("00000000-0000-0000-0000-000000000002"), adapterInstanceId);
+    }
+
+    private EndpointDiscoveryFact endpointFactWithId(UUID factId, String adapterInstanceId) {
         return new EndpointDiscoveryFact(
-            UUID.fromString("00000000-0000-0000-0000-000000000002"),
+            factId,
             adapterInstanceId,
             "tuya",
             "tuya-device-abc",
@@ -445,8 +465,12 @@ class TopologyMaterializationSeedTest {
     }
 
     private CapabilityDiscoveryFact capabilityFact(String adapterInstanceId) {
+        return capabilityFactWithId(UUID.fromString("00000000-0000-0000-0000-000000000003"), adapterInstanceId);
+    }
+
+    private CapabilityDiscoveryFact capabilityFactWithId(UUID factId, String adapterInstanceId) {
         return new CapabilityDiscoveryFact(
-            UUID.fromString("00000000-0000-0000-0000-000000000003"),
+            factId,
             adapterInstanceId,
             "tuya",
             "tuya-device-abc",

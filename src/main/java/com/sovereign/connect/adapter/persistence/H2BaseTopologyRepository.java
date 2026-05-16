@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sovereign.connect.core.topology.event.TopologyChangeKind;
+import com.sovereign.connect.core.topology.event.TopologyChanged;
+import com.sovereign.connect.core.topology.materialization.MaterializationDecision;
+import com.sovereign.connect.core.topology.materialization.MaterializationDecisionKind;
 import com.sovereign.connect.core.topology.model.BaseTopologySnapshot;
 import com.sovereign.connect.core.topology.model.DeviceNode;
 import com.sovereign.connect.core.topology.model.EndpointHealth;
@@ -20,6 +23,7 @@ import com.sovereign.connect.core.topology.model.ZoneNode;
 import com.sovereign.connect.core.topology.port.BaseTopologyRepository;
 import com.sovereign.connect.core.topology.port.CoreSnapshotReadPort;
 import com.sovereign.connect.core.topology.port.EndpointHealthWritePort;
+import com.sovereign.connect.core.topology.port.MaterializationDecisionReplayPort;
 import com.sovereign.connect.core.topology.port.TopologyMaterializationStatePort;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -39,9 +43,11 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSnapshotReadPort, EndpointHealthWritePort, TopologyMaterializationStatePort {
+public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSnapshotReadPort, EndpointHealthWritePort, TopologyMaterializationStatePort, MaterializationDecisionReplayPort {
 
     private static final TypeReference<Map<String, Object>> STATE_TYPE = new TypeReference<>() {
+    };
+    private static final TypeReference<List<TopologyChanged>> TOPOLOGY_CHANGED_LIST_TYPE = new TypeReference<>() {
     };
 
     private final JdbcTemplate jdbcTemplate;
@@ -210,6 +216,52 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSna
     }
 
     @Override
+    public Optional<MaterializationDecision> findDecision(String habitatId, UUID factId) {
+        Objects.requireNonNull(habitatId, "habitatId is required");
+        Objects.requireNonNull(factId, "factId is required");
+        List<MaterializationDecision> results = jdbcTemplate.query(
+            """
+                SELECT decision_id, kind,
+                       previous_version_value, resulting_version_value,
+                       emitted_changes_json, reason
+                FROM materialization_decision_replay
+                WHERE habitat_id = ? AND fact_id = ?
+                """,
+            (rs, rowNum) -> toMaterializationDecision(habitatId, factId, rs),
+            habitatId,
+            factId.toString()
+        );
+        return results.stream().findFirst();
+    }
+
+    @Override
+    public void recordDecision(String habitatId, UUID factId, MaterializationDecision decision) {
+        Objects.requireNonNull(habitatId, "habitatId is required");
+        Objects.requireNonNull(factId, "factId is required");
+        Objects.requireNonNull(decision, "decision is required");
+        String emittedChangesJson = writeJson(decision.emittedChanges());
+        jdbcTemplate.update(
+            """
+                MERGE INTO materialization_decision_replay
+                (habitat_id, fact_id, decision_id, kind,
+                 previous_version_value, resulting_version_value,
+                 emitted_changes_json, reason, recorded_at)
+                KEY (habitat_id, fact_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            habitatId,
+            factId.toString(),
+            decision.decisionId().toString(),
+            decision.kind().name(),
+            decision.previousTopologyVersion().map(TopologyVersion::value).orElse(null),
+            decision.resultingTopologyVersion().map(TopologyVersion::value).orElse(null),
+            emittedChangesJson,
+            decision.reason(),
+            Timestamp.from(Instant.now(clock))
+        );
+    }
+
+    @Override
     public Optional<RoomNode> findRoom(String habitatId, String roomId) {
         Objects.requireNonNull(roomId, "roomId is required");
         return findByHabitatId(habitatId)
@@ -337,6 +389,22 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSna
                 )
                 """
         );
+        jdbcTemplate.execute(
+            """
+                CREATE TABLE IF NOT EXISTS materialization_decision_replay (
+                    habitat_id              VARCHAR(255)  NOT NULL,
+                    fact_id                 VARCHAR(36)   NOT NULL,
+                    decision_id             VARCHAR(36)   NOT NULL,
+                    kind                    VARCHAR(128)  NOT NULL,
+                    previous_version_value  VARCHAR(255),
+                    resulting_version_value VARCHAR(255),
+                    emitted_changes_json    CLOB          NOT NULL,
+                    reason                  VARCHAR(2048) NOT NULL,
+                    recorded_at             TIMESTAMP     NOT NULL,
+                    PRIMARY KEY (habitat_id, fact_id)
+                )
+                """
+        );
     }
 
     private boolean isDeviceLocatedIn(HabitatBaseTopology topology, DeviceNode device, String roomOrZoneId) {
@@ -384,6 +452,27 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSna
         );
     }
 
+    private MaterializationDecision toMaterializationDecision(String habitatId, UUID factId, ResultSet rs) throws SQLException {
+        String previousValue = rs.getString("previous_version_value");
+        String resultingValue = rs.getString("resulting_version_value");
+        Optional<TopologyVersion> previousVersion = previousValue == null
+            ? Optional.empty()
+            : Optional.of(TopologyVersion.habitatVersion(habitatId, Long.parseLong(previousValue)));
+        Optional<TopologyVersion> resultingVersion = resultingValue == null
+            ? Optional.empty()
+            : Optional.of(TopologyVersion.habitatVersion(habitatId, Long.parseLong(resultingValue)));
+        return new MaterializationDecision(
+            UUID.fromString(rs.getString("decision_id")),
+            factId,
+            habitatId,
+            MaterializationDecisionKind.valueOf(rs.getString("kind")),
+            previousVersion,
+            resultingVersion,
+            readJson(rs.getString("emitted_changes_json"), TOPOLOGY_CHANGED_LIST_TYPE),
+            rs.getString("reason")
+        );
+    }
+
     private String joinChangeKinds(Set<TopologyChangeKind> changeKinds) {
         return changeKinds.stream()
             .map(TopologyChangeKind::name)
@@ -424,6 +513,14 @@ public class H2BaseTopologyRepository implements BaseTopologyRepository, CoreSna
             return objectMapper.readValue(json, type);
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("failed to deserialize " + type.getSimpleName(), ex);
+        }
+    }
+
+    private <T> T readJson(String json, TypeReference<T> type) {
+        try {
+            return objectMapper.readValue(json, type);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("failed to deserialize json", ex);
         }
     }
 

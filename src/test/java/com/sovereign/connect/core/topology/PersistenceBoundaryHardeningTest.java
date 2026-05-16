@@ -106,6 +106,7 @@ class PersistenceBoundaryHardeningTest {
             mutationService,
             repository,
             adapterInstanceId -> true,
+            repository,
             clock
         );
 

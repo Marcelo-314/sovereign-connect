@@ -351,7 +351,7 @@ class RoomZoneTopologySeedTest {
         BaseTopologyService service = new BaseTopologyService(repository, repository, clock);
         CoreSnapshotQueryService query = new CoreSnapshotQueryService(repository, clock);
         DefaultTopologyMaterializationService materializer = new DefaultTopologyMaterializationService(
-            service, repository, adapterInstanceId -> true, clock
+            service, repository, adapterInstanceId -> true, repository, clock
         );
         service.createInitialTopology("habitat-013", List.of(), List.of(), List.of(), List.of());
         return new Fixture(repository, service, query, materializer);
@@ -366,7 +366,7 @@ class RoomZoneTopologySeedTest {
         BaseTopologyService service = new BaseTopologyService(repository, repository, clock);
         CoreSnapshotQueryService query = new CoreSnapshotQueryService(repository, clock);
         DefaultTopologyMaterializationService materializer = new DefaultTopologyMaterializationService(
-            service, repository, adapterInstanceId -> true, clock
+            service, repository, adapterInstanceId -> true, repository, clock
         );
         service.createInitialTopology(
             "habitat-013",
