@@ -30,6 +30,7 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
@@ -341,6 +342,91 @@ class TemporalActSeedTest {
             .extracting(Class::getSimpleName)
             .containsExactly("SignalTemporalPayload");
         assertThat(notificationTargetRef(fixture.jdbcUrl, "timer-fired-signal:" + id)).isEqualTo("surface:bedroom-left");
+    }
+
+    @Test
+    void insertCreatedRejectsNonPendingTemporalAct() {
+        DataSource dataSource = dataSource(jdbcUrl("non-pending-insert"));
+        H2TemporalActRepository repository = new H2TemporalActRepository(dataSource, mapper(), clock);
+        Instant now = Instant.now(clock);
+
+        TemporalAct firedAct = new TemporalAct(
+            UUID.randomUUID().toString(),
+            "habitat-001",
+            TemporalActStatus.FIRED,
+            now.plusSeconds(60),
+            new SignalTemporalPayload("alarm", "timer"),
+            null,
+            new CreatedByRef("hub-test"),
+            null,
+            now,
+            now,
+            now,
+            now,
+            "fired"
+        );
+
+        assertThatThrownBy(() -> repository.insertCreated(firedAct))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("PENDING");
+    }
+
+    @Test
+    void insertCreatedRejectsTerminalMetadata() {
+        DataSource dataSource = dataSource(jdbcUrl("terminal-metadata-insert"));
+        H2TemporalActRepository repository = new H2TemporalActRepository(dataSource, mapper(), clock);
+        Instant now = Instant.now(clock);
+
+        TemporalAct invalidAct = new TemporalAct(
+            UUID.randomUUID().toString(),
+            "habitat-001",
+            TemporalActStatus.PENDING,
+            now.plusSeconds(60),
+            new SignalTemporalPayload("alarm", "timer"),
+            null,
+            new CreatedByRef("hub-test"),
+            null,
+            now,
+            now,
+            now,
+            null,
+            null
+        );
+
+        assertThatThrownBy(() -> repository.insertCreated(invalidAct))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("non-terminal");
+    }
+
+    @Test
+    void temporalEngineRunnerDoesNotUseThreadSleep() throws IOException {
+        Path source = Path.of(
+            "src/main/java/com/sovereign/connect/core/temporal/service/TemporalEngineRunner.java"
+        );
+
+        String text = Files.readString(source);
+
+        assertThat(text).doesNotContain("Thread.sleep");
+        assertThat(text).doesNotContain("@Scheduled");
+        assertThat(text).contains("Thread.ofVirtual");
+        assertThat(text).contains("LockSupport.parkNanos");
+        assertThat(text).contains("LockSupport.unpark");
+    }
+
+    @Test
+    void runnerStopsCooperatively() {
+        Fixture fixture = fixture(jdbcUrl("runner-stop"));
+        TemporalEngineRunner runner = new TemporalEngineRunner(
+            fixture.engine,
+            "habitat-001",
+            clock,
+            5_000L
+        );
+
+        runner.start();
+        runner.stop();
+
+        assertThat(runner.awaitStopped(Duration.ofSeconds(1))).isTrue();
     }
 
     private String createDueAct(Fixture fixture, String habitatId) {
