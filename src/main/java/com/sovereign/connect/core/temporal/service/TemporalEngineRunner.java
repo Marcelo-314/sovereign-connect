@@ -1,10 +1,14 @@
 package com.sovereign.connect.core.temporal.service;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.LockSupport;
 
-public class TemporalEngineRunner {
+public final class TemporalEngineRunner implements AutoCloseable {
 
     public static final long DEFAULT_POLLING_INTERVAL_MS = 1000L;
 
@@ -12,8 +16,9 @@ public class TemporalEngineRunner {
     private final long pollingIntervalMs;
     private final String habitatId;
     private final Clock clock;
-    private volatile boolean running;
-    private Thread runnerThread;
+    private final AtomicBoolean running = new AtomicBoolean(false);
+    private volatile Thread runnerThread;
+    private volatile RuntimeException lastFailure;
 
     public TemporalEngineRunner(TemporalEngineService engine, String habitatId, Clock clock) {
         this(engine, habitatId, clock, DEFAULT_POLLING_INTERVAL_MS);
@@ -30,32 +35,65 @@ public class TemporalEngineRunner {
     }
 
     public void start() {
-        running = true;
-        runnerThread = Thread.ofVirtual().name("temporal-engine-runner").start(() -> {
-            while (running) {
+        if (!running.compareAndSet(false, true)) {
+            return;
+        }
+        runnerThread = Thread.ofVirtual()
+            .name("temporal-engine-runner")
+            .start(this::runLoop);
+    }
+
+    private void runLoop() {
+        try {
+            while (running.get()) {
                 try {
                     engine.pollDueOnce(habitatId, Instant.now(clock));
-                } catch (Exception ignored) {
-                    // The runner is a thin runtime loop; one failed poll must not stop it.
+                } catch (RuntimeException ex) {
+                    lastFailure = ex;
                 }
-                try {
-                    Thread.sleep(pollingIntervalMs);
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
+
+                if (!running.get()) {
                     break;
                 }
+
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(pollingIntervalMs));
             }
-        });
+        } finally {
+            running.set(false);
+        }
     }
 
     public void stop() {
-        running = false;
-        if (runnerThread != null) {
-            runnerThread.interrupt();
+        running.set(false);
+        Thread thread = runnerThread;
+        if (thread != null) {
+            LockSupport.unpark(thread);
         }
+    }
+
+    public boolean isRunning() {
+        return running.get();
+    }
+
+    public RuntimeException lastFailure() {
+        return lastFailure;
+    }
+
+    public boolean awaitStopped(Duration timeout) {
+        Objects.requireNonNull(timeout, "timeout is required");
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (running.get() && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        return !running.get();
     }
 
     public long pollingIntervalMs() {
         return pollingIntervalMs;
+    }
+
+    @Override
+    public void close() {
+        stop();
     }
 }

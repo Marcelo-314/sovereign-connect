@@ -40,6 +40,17 @@ public class H2TemporalActRepository implements TemporalActWritePort, TemporalAc
     @Override
     public void insertCreated(TemporalAct act) {
         Objects.requireNonNull(act, "act is required");
+        if (act.status() != TemporalActStatus.PENDING) {
+            throw new IllegalArgumentException(
+                "insertCreated accepts only PENDING TemporalActs in MU-005 seed: " + act.status()
+            );
+        }
+        if (act.firedAt() != null || act.terminalAt() != null || act.terminalReason() != null) {
+            throw new IllegalArgumentException(
+                "insertCreated accepts only non-terminal newly-created TemporalActs; "
+                    + "firedAt/terminalAt/terminalReason must be null"
+            );
+        }
         jdbcTemplate.update(
             """
                 INSERT INTO temporal_acts
