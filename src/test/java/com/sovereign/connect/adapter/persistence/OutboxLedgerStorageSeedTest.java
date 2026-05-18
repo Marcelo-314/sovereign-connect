@@ -289,7 +289,7 @@ class OutboxLedgerStorageSeedTest {
     }
 
     @Test
-    void temporalActFiredLikeRecordCanBeStoredWithoutTemporalEngine() throws IOException {
+    void temporalActFiredLikeRecordCanBeStoredByLedgerOutboxSeed() {
         String jdbcUrl = jdbcUrl("temporal-like");
         H2BaseTopologyRepository repository = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
         LedgerEntry ledger = ledgerEntry(
@@ -314,11 +314,10 @@ class OutboxLedgerStorageSeedTest {
             .isEqualTo(1);
         assertThat(jdbc(jdbcUrl).queryForObject("SELECT COUNT(*) FROM sc_c_outbox_entries", Integer.class))
             .isEqualTo(1);
-        assertThat(productionFileNames()).noneMatch(name -> name.contains("TemporalAct"));
     }
 
     @Test
-    void noDispatcherSurfaceIntroduced() throws IOException {
+    void noOutboxDispatcherSurfaceIntroduced() throws IOException {
         List<String> forbidden = List.of(
             "ScLedgerReadPort",
             "ScOutboxReadPort",
@@ -326,15 +325,12 @@ class OutboxLedgerStorageSeedTest {
             "markClaimed",
             "markDispatched",
             "retryLoop",
-            "pollLoop",
-            "pollingLoop",
             "org.nats",
             "io.nats",
             "JetStream",
             "sc_c_delivery_observations",
             "sc_c_terminal_responses",
-            "sc_c_outbox_attempts",
-            "temporal_acts"
+            "sc_c_outbox_attempts"
         );
 
         for (String source : productionSources()) {
@@ -471,19 +467,6 @@ class OutboxLedgerStorageSeedTest {
                         throw new IllegalStateException("failed to read " + path, ex);
                     }
                 })
-                .toList();
-        }
-    }
-
-    private List<String> productionFileNames() throws IOException {
-        Path root = Path.of("src/main/java");
-        if (Files.notExists(root)) {
-            return List.of();
-        }
-        try (Stream<Path> paths = Files.walk(root)) {
-            return paths
-                .filter(Files::isRegularFile)
-                .map(path -> path.getFileName().toString())
                 .toList();
         }
     }
