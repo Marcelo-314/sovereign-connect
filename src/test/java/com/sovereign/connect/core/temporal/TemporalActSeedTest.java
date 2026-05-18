@@ -407,14 +407,16 @@ class TemporalActSeedTest {
         String text = Files.readString(source);
 
         assertThat(text).doesNotContain("Thread.sleep");
+        assertThat(text).doesNotContain("Thread.onSpinWait");
         assertThat(text).doesNotContain("@Scheduled");
         assertThat(text).contains("Thread.ofVirtual");
         assertThat(text).contains("LockSupport.parkNanos");
         assertThat(text).contains("LockSupport.unpark");
+        assertThat(text).contains(".join(");
     }
 
     @Test
-    void runnerStopsCooperatively() {
+    void runnerStopsCooperativelyAndAwaitWaitsForTermination() {
         Fixture fixture = fixture(jdbcUrl("runner-stop"));
         TemporalEngineRunner runner = new TemporalEngineRunner(
             fixture.engine,
@@ -427,6 +429,7 @@ class TemporalActSeedTest {
         runner.stop();
 
         assertThat(runner.awaitStopped(Duration.ofSeconds(1))).isTrue();
+        assertThat(runner.isRunning()).isFalse();
     }
 
     private String createDueAct(Fixture fixture, String habitatId) {

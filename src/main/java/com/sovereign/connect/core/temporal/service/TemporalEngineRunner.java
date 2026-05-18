@@ -81,11 +81,21 @@ public final class TemporalEngineRunner implements AutoCloseable {
 
     public boolean awaitStopped(Duration timeout) {
         Objects.requireNonNull(timeout, "timeout is required");
-        long deadline = System.nanoTime() + timeout.toNanos();
-        while (running.get() && System.nanoTime() < deadline) {
-            Thread.onSpinWait();
+        Thread thread = runnerThread;
+        if (thread == null) {
+            return true;
         }
-        return !running.get();
+        if (Thread.currentThread() == thread) {
+            return !thread.isAlive();
+        }
+        try {
+            long timeoutMillis = Math.max(1L, timeout.toMillis());
+            thread.join(timeoutMillis);
+            return !thread.isAlive();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     public long pollingIntervalMs() {
