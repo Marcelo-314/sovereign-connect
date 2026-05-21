@@ -12,6 +12,7 @@ import com.sovereign.connect.core.temporal.model.TemporalAct;
 import com.sovereign.connect.core.temporal.model.TemporalActStatus;
 import com.sovereign.connect.core.temporal.port.TemporalActReadPort;
 import com.sovereign.connect.core.temporal.port.TemporalActWritePort;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
@@ -58,8 +59,32 @@ public class TemporalActService {
         Objects.requireNonNull(payload, "payload is required");
         Objects.requireNonNull(dueAt, "dueAt is required");
         Objects.requireNonNull(createdByRef, "createdByRef is required");
+        return txTemplate.execute(status ->
+            createSignalTemporalActInExistingTransaction(habitatId, payload, dueAt, notificationTargetRef, createdByRef, Instant.now(clock))
+                .temporalActId()
+        );
+    }
+
+    public int cancelTemporalAct(String habitatId, String temporalActId, Instant now) {
+        Objects.requireNonNull(now, "now is required");
+        return txTemplate.execute(status -> cancelTemporalActInExistingTransaction(habitatId, temporalActId, now));
+    }
+
+    public TemporalAct createSignalTemporalActInExistingTransaction(
+        String habitatId,
+        SignalTemporalPayload payload,
+        Instant dueAt,
+        String notificationTargetRef,
+        CreatedByRef createdByRef,
+        Instant requestedAt
+    ) {
+        assertActiveTransaction();
+        Objects.requireNonNull(habitatId, "habitatId is required");
+        Objects.requireNonNull(payload, "payload is required");
+        Objects.requireNonNull(dueAt, "dueAt is required");
+        Objects.requireNonNull(createdByRef, "createdByRef is required");
+        Objects.requireNonNull(requestedAt, "requestedAt is required");
         String temporalActId = UUID.randomUUID().toString();
-        Instant now = Instant.now(clock);
         TemporalAct act = new TemporalAct(
             temporalActId,
             habitatId,
@@ -69,28 +94,25 @@ public class TemporalActService {
             notificationTargetRef,
             createdByRef,
             null,
-            now,
-            now,
+            requestedAt,
+            requestedAt,
             null,
             null,
             null
         );
-        txTemplate.executeWithoutResult(status -> {
-            writePort.insertCreated(act);
-            ledgerPort.appendLedgerEntry(createdLedgerEntry(act, now));
-        });
-        return temporalActId;
+        writePort.insertCreated(act);
+        ledgerPort.appendLedgerEntry(createdLedgerEntry(act, requestedAt));
+        return act;
     }
 
-    public int cancelTemporalAct(String habitatId, String temporalActId, Instant now) {
+    public int cancelTemporalActInExistingTransaction(String habitatId, String temporalActId, Instant now) {
+        assertActiveTransaction();
         Objects.requireNonNull(now, "now is required");
-        return txTemplate.execute(status -> {
-            int updated = writePort.cancelIfNonTerminal(habitatId, temporalActId, now);
-            if (updated == 1) {
-                ledgerPort.appendLedgerEntry(cancelledLedgerEntry(habitatId, temporalActId, now));
-            }
-            return updated;
-        });
+        int updated = writePort.cancelIfNonTerminal(habitatId, temporalActId, now);
+        if (updated == 1) {
+            ledgerPort.appendLedgerEntry(cancelledLedgerEntry(habitatId, temporalActId, now));
+        }
+        return updated;
     }
 
     public Optional<TemporalAct> findById(String habitatId, String temporalActId) {
@@ -123,6 +145,12 @@ public class TemporalActService {
             now,
             null
         );
+    }
+
+    private void assertActiveTransaction() {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("temporal act mutation requires an active transaction");
+        }
     }
 
     private LedgerEntry cancelledLedgerEntry(String habitatId, String temporalActId, Instant now) {

@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
+import com.sovereign.connect.core.temporal.engine.TemporalEngineHealth;
 
 public final class TemporalEngineRunner implements AutoCloseable {
 
@@ -14,6 +15,10 @@ public final class TemporalEngineRunner implements AutoCloseable {
 
     private final TemporalEngineService engine;
     private final long pollingIntervalMs;
+    private final int maxDueActsPerCycle;
+    private final long failureBackoffMs;
+    private final int maxConsecutiveFailures;
+    private final TemporalEngineHealth health;
     private final String habitatId;
     private final Clock clock;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -25,6 +30,19 @@ public final class TemporalEngineRunner implements AutoCloseable {
     }
 
     public TemporalEngineRunner(TemporalEngineService engine, String habitatId, Clock clock, long pollingIntervalMs) {
+        this(engine, habitatId, clock, pollingIntervalMs, Integer.MAX_VALUE, pollingIntervalMs, Integer.MAX_VALUE, null);
+    }
+
+    public TemporalEngineRunner(
+        TemporalEngineService engine,
+        String habitatId,
+        Clock clock,
+        long pollingIntervalMs,
+        int maxDueActsPerCycle,
+        long failureBackoffMs,
+        int maxConsecutiveFailures,
+        TemporalEngineHealth health
+    ) {
         this.engine = Objects.requireNonNull(engine, "engine is required");
         this.habitatId = Objects.requireNonNull(habitatId, "habitatId is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
@@ -32,6 +50,10 @@ public final class TemporalEngineRunner implements AutoCloseable {
             throw new IllegalArgumentException("pollingIntervalMs must be positive");
         }
         this.pollingIntervalMs = pollingIntervalMs;
+        this.maxDueActsPerCycle = maxDueActsPerCycle;
+        this.failureBackoffMs = failureBackoffMs <= 0 ? pollingIntervalMs : failureBackoffMs;
+        this.maxConsecutiveFailures = maxConsecutiveFailures <= 0 ? Integer.MAX_VALUE : maxConsecutiveFailures;
+        this.health = health;
     }
 
     public void start() {
@@ -44,19 +66,29 @@ public final class TemporalEngineRunner implements AutoCloseable {
     }
 
     private void runLoop() {
+        int consecutiveFailures = 0;
         try {
             while (running.get()) {
                 try {
-                    engine.pollDueOnce(habitatId, Instant.now(clock));
+                    engine.pollDueOnce(habitatId, Instant.now(clock), maxDueActsPerCycle);
+                    consecutiveFailures = 0;
+                    if (health != null) {
+                        health.recordPollSuccess();
+                    }
                 } catch (RuntimeException ex) {
                     lastFailure = ex;
+                    consecutiveFailures++;
+                    if (health != null) {
+                        health.recordPollFailure(ex);
+                    }
                 }
 
                 if (!running.get()) {
                     break;
                 }
 
-                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(pollingIntervalMs));
+                long waitMs = consecutiveFailures >= maxConsecutiveFailures ? failureBackoffMs : pollingIntervalMs;
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(waitMs));
             }
         } finally {
             running.set(false);
