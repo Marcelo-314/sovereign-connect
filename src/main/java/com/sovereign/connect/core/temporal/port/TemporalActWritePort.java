@@ -12,4 +12,6 @@ public interface TemporalActWritePort {
     int markFiredIfDueAndNonTerminal(String habitatId, String temporalActId, Instant now);
 
     int markMisfiredIfDueAndNonTerminal(String habitatId, String temporalActId, Instant cutoff, Instant now);
+
+    int markFailed(String habitatId, String temporalActId, String reason, Instant now);
 }

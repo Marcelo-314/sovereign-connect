@@ -1,0 +1,27 @@
+spring:
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+  datasource:
+    url: "jdbc:sqlite:./data/sovereign-connect.sqlite"
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+sovereign:
+  temporal:
+    engine:
+      enabled: true
+      habitat-id: "habitat-001"
+      polling-interval-ms: 1000
+      max-due-acts-per-cycle: 50
+      max-recovery-batch-size: 200
+      max-recovery-batches-per-startup: 50
+      terminal-retention-days: 30
+      max-terminal-results: 500
+      max-misfired-results: 500
+      single-node-guard-enabled: true
+      single-node-guard-ttl-ms: 30000
+      shutdown-timeout-ms: 5000
+      failure-backoff-ms: 5000
+      max-consecutive-failures: 5

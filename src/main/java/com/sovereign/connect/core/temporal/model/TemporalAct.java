@@ -24,7 +24,6 @@ public record TemporalAct(
         Objects.requireNonNull(habitatId, "habitatId is required");
         Objects.requireNonNull(status, "status is required");
         Objects.requireNonNull(dueAt, "dueAt is required");
-        Objects.requireNonNull(payload, "payload is required");
         Objects.requireNonNull(createdByRef, "createdByRef is required");
         Objects.requireNonNull(createdAt, "createdAt is required");
         Objects.requireNonNull(updatedAt, "updatedAt is required");

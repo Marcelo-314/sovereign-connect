@@ -1,4 +1,4 @@
-package com.sovereign.connect.adapter.persistence;
+package com.sovereign.connect.adapter.persistence.sqlite;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,58 +20,64 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-public class H2TemporalActRepository implements TemporalActWritePort, TemporalActReadPort {
+public class SQLiteTemporalActRepository implements TemporalActWritePort, TemporalActReadPort {
 
-    private static final System.Logger LOGGER = System.getLogger(H2TemporalActRepository.class.getName());
+    private static final System.Logger LOGGER = System.getLogger(SQLiteTemporalActRepository.class.getName());
+    private static final long DAY_MS = 86_400_000L;
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final int terminalRetentionDays;
 
-    public H2TemporalActRepository(DataSource dataSource) {
-        this(dataSource, new ObjectMapper().findAndRegisterModules(), Clock.systemUTC());
+    public SQLiteTemporalActRepository(DataSource dataSource) {
+        this(dataSource, new ObjectMapper().findAndRegisterModules(), Clock.systemUTC(), 30);
     }
 
-    public H2TemporalActRepository(DataSource dataSource, ObjectMapper objectMapper, Clock clock) {
+    public SQLiteTemporalActRepository(
+        DataSource dataSource,
+        ObjectMapper objectMapper,
+        Clock clock,
+        int terminalRetentionDays
+    ) {
         this.jdbcTemplate = new JdbcTemplate(Objects.requireNonNull(dataSource, "dataSource is required"));
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
-        createSchema();
+        this.terminalRetentionDays = terminalRetentionDays;
     }
 
     @Override
     public void insertCreated(TemporalAct act) {
         Objects.requireNonNull(act, "act is required");
         if (act.status() != TemporalActStatus.PENDING) {
-            throw new IllegalArgumentException(
-                "insertCreated accepts only PENDING TemporalActs in MU-005 seed: " + act.status()
-            );
+            throw new IllegalArgumentException("insertCreated accepts only PENDING TemporalActs: " + act.status());
         }
-        if (act.firedAt() != null || act.terminalAt() != null || act.terminalReason() != null) {
-            throw new IllegalArgumentException(
-                "insertCreated accepts only non-terminal newly-created TemporalActs; "
-                    + "firedAt/terminalAt/terminalReason must be null"
-            );
+        if (act.notificationTargetRef() == null || act.notificationTargetRef().isBlank()) {
+            throw new IllegalArgumentException("notificationTargetRef is required");
+        }
+        if (!(act.payload() instanceof SignalTemporalPayload payload)) {
+            throw new IllegalArgumentException("only SignalTemporalPayload is supported in v1");
         }
         jdbcTemplate.update(
             """
                 INSERT INTO temporal_acts
-                (temporal_act_id, habitat_id, status, due_at_ms, payload_type, payload_json,
-                 notification_target_ref, created_by_ref_json, topology_version_at_registration,
-                 created_at_ms, updated_at_ms)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (habitat_id, temporal_act_id, status, payload_kind, due_at_ms,
+                 label, signal_kind, notification_target_ref, created_by_ref,
+                 requested_at_ms, created_at_ms, updated_at_ms, signal_payload_json)
+                VALUES (?, ?, ?, 'SIGNAL', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-            act.temporalActId(),
             act.habitatId(),
+            SQLiteCanonicalIdCodec.toBlob16(act.temporalActId()),
             act.status().name(),
             act.dueAt().toEpochMilli(),
-            act.payload().getClass().getSimpleName(),
-            writeJson(act.payload()),
+            payload.label(),
+            payload.signalKind(),
             act.notificationTargetRef(),
-            writeJson(act.createdByRef()),
-            act.topologyVersionAtRegistration(),
+            act.createdByRef().value(),
+            null,
             act.createdAt().toEpochMilli(),
-            act.updatedAt().toEpochMilli()
+            act.updatedAt().toEpochMilli(),
+            writeJson(payload)
         );
     }
 
@@ -91,7 +97,7 @@ public class H2TemporalActRepository implements TemporalActWritePort, TemporalAc
                 """,
             now.toEpochMilli(),
             now.toEpochMilli(),
-            temporalActId,
+            SQLiteCanonicalIdCodec.toBlob16(temporalActId),
             habitatId
         );
     }
@@ -114,7 +120,7 @@ public class H2TemporalActRepository implements TemporalActWritePort, TemporalAc
             now.toEpochMilli(),
             now.toEpochMilli(),
             now.toEpochMilli(),
-            temporalActId,
+            SQLiteCanonicalIdCodec.toBlob16(temporalActId),
             habitatId,
             now.toEpochMilli()
         );
@@ -135,10 +141,10 @@ public class H2TemporalActRepository implements TemporalActWritePort, TemporalAc
                   AND habitat_id = ?
                   AND status IN ('PENDING','ARMED')
                   AND due_at_ms <= ?
-                """,
+            """,
             now.toEpochMilli(),
             now.toEpochMilli(),
-            temporalActId,
+            SQLiteCanonicalIdCodec.toBlob16(temporalActId),
             habitatId,
             cutoff.toEpochMilli()
         );
@@ -161,31 +167,29 @@ public class H2TemporalActRepository implements TemporalActWritePort, TemporalAc
             now.toEpochMilli(),
             now.toEpochMilli(),
             reason,
-            temporalActId,
+            SQLiteCanonicalIdCodec.toBlob16(temporalActId),
             habitatId
         );
     }
 
     @Override
     public Optional<TemporalAct> findById(String habitatId, String temporalActId) {
-        List<TemporalAct> results = jdbcTemplate.query(
-            """
-                SELECT temporal_act_id, habitat_id, status, due_at_ms, payload_type, payload_json,
-                       notification_target_ref, created_by_ref_json, topology_version_at_registration,
-                       created_at_ms, updated_at_ms, fired_at_ms, terminal_at_ms, terminal_reason
-                FROM temporal_acts
-                WHERE habitat_id = ? AND temporal_act_id = ?
-                """,
+        List<TemporalAct> results = jdbcTemplate.query(selectBase()
+                + " WHERE habitat_id = ? AND temporal_act_id = ?",
             (rs, rowNum) -> toTemporalAct(rs),
             habitatId,
-            temporalActId
+            SQLiteCanonicalIdCodec.toBlob16(temporalActId)
         );
         return results.stream().findFirst();
     }
 
     @Override
     public List<TemporalAct> listActive(String habitatId) {
-        return queryByStatusSet(habitatId, "status IN ('PENDING','ARMED')");
+        return jdbcTemplate.query(selectBase()
+                + " WHERE habitat_id = ? AND status IN ('PENDING','ARMED') ORDER BY due_at_ms ASC",
+            (rs, rowNum) -> toTemporalAct(rs),
+            habitatId
+        );
     }
 
     @Override
@@ -195,19 +199,14 @@ public class H2TemporalActRepository implements TemporalActWritePort, TemporalAc
 
     @Override
     public List<TemporalAct> findDue(String habitatId, Instant now, int maxRows) {
-        Objects.requireNonNull(now, "now is required");
-        return jdbcTemplate.query(
-            """
-                SELECT temporal_act_id, habitat_id, status, due_at_ms, payload_type, payload_json,
-                       notification_target_ref, created_by_ref_json, topology_version_at_registration,
-                       created_at_ms, updated_at_ms, fired_at_ms, terminal_at_ms, terminal_reason
-                FROM temporal_acts
-                WHERE habitat_id = ?
-                  AND status IN ('PENDING','ARMED')
-                  AND due_at_ms <= ?
-                ORDER BY due_at_ms ASC
-                LIMIT ?
-                """,
+        return jdbcTemplate.query(selectBase()
+                + """
+                   WHERE habitat_id = ?
+                     AND status IN ('PENDING','ARMED')
+                     AND due_at_ms <= ?
+                   ORDER BY due_at_ms ASC
+                   LIMIT ?
+                   """,
             (rs, rowNum) -> toTemporalAct(rs),
             habitatId,
             now.toEpochMilli(),
@@ -222,19 +221,14 @@ public class H2TemporalActRepository implements TemporalActWritePort, TemporalAc
 
     @Override
     public List<TemporalAct> findNonTerminalDueBefore(String habitatId, Instant cutoff, int maxRows) {
-        Objects.requireNonNull(cutoff, "cutoff is required");
-        return jdbcTemplate.query(
-            """
-                SELECT temporal_act_id, habitat_id, status, due_at_ms, payload_type, payload_json,
-                       notification_target_ref, created_by_ref_json, topology_version_at_registration,
-                       created_at_ms, updated_at_ms, fired_at_ms, terminal_at_ms, terminal_reason
-                FROM temporal_acts
-                WHERE habitat_id = ?
-                  AND status IN ('PENDING','ARMED')
-                  AND due_at_ms <= ?
-                ORDER BY due_at_ms ASC
-                LIMIT ?
-                """,
+        return jdbcTemplate.query(selectBase()
+                + """
+                   WHERE habitat_id = ?
+                     AND status IN ('PENDING','ARMED')
+                     AND due_at_ms <= ?
+                   ORDER BY due_at_ms ASC
+                   LIMIT ?
+                   """,
             (rs, rowNum) -> toTemporalAct(rs),
             habitatId,
             cutoff.toEpochMilli(),
@@ -244,90 +238,56 @@ public class H2TemporalActRepository implements TemporalActWritePort, TemporalAc
 
     @Override
     public List<TemporalAct> listTerminal(String habitatId) {
-        return queryByStatusSet(habitatId, "status IN ('FIRED','CANCELLED','EXPIRED','MISFIRED','FAILED')");
+        return listTerminal(habitatId, Integer.MAX_VALUE);
     }
 
     @Override
     public List<TemporalAct> listTerminal(String habitatId, int maxResults) {
-        return queryByStatusSet(habitatId, "status IN ('FIRED','CANCELLED','EXPIRED','MISFIRED','FAILED')", maxResults);
+        return terminalQuery(habitatId, "status IN ('FIRED','CANCELLED','MISFIRED','FAILED','EXPIRED')", maxResults);
     }
 
     @Override
     public List<TemporalAct> listMisfired(String habitatId) {
-        return queryByStatusSet(habitatId, "status = 'MISFIRED'");
+        return listMisfired(habitatId, Integer.MAX_VALUE);
     }
 
     @Override
     public List<TemporalAct> listMisfired(String habitatId, int maxResults) {
-        return queryByStatusSet(habitatId, "status = 'MISFIRED'", maxResults);
+        return terminalQuery(habitatId, "status = 'MISFIRED'", maxResults);
     }
 
-    private void createSchema() {
-        jdbcTemplate.execute(
-            """
-                CREATE TABLE IF NOT EXISTS temporal_acts (
-                    temporal_act_id         VARCHAR(36)   PRIMARY KEY,
-                    habitat_id              VARCHAR(255)  NOT NULL,
-                    status                  VARCHAR(64)   NOT NULL
-                                            CHECK(status IN ('PENDING','ARMED','FIRED',
-                                                             'CANCELLED','EXPIRED','MISFIRED','FAILED')),
-                    due_at_ms               BIGINT        NOT NULL,
-                    payload_type            VARCHAR(255)  NOT NULL,
-                    payload_json            CLOB          NOT NULL,
-                    notification_target_ref VARCHAR(512),
-                    created_by_ref_json     CLOB          NOT NULL,
-                    topology_version_at_registration VARCHAR(255),
-                    created_at_ms           BIGINT        NOT NULL,
-                    updated_at_ms           BIGINT        NOT NULL,
-                    fired_at_ms             BIGINT,
-                    terminal_at_ms          BIGINT,
-                    terminal_reason         VARCHAR(2048)
-                )
-                """
-        );
-        jdbcTemplate.execute(
-            """
-                CREATE INDEX IF NOT EXISTS ix_temporal_acts_due_status
-                ON temporal_acts(habitat_id, status, due_at_ms)
-                """
-        );
-        jdbcTemplate.execute(
-            """
-                CREATE INDEX IF NOT EXISTS ix_temporal_acts_status
-                ON temporal_acts(habitat_id, status)
-                """
-        );
-    }
-
-    private List<TemporalAct> queryByStatusSet(String habitatId, String statusPredicate) {
-        return queryByStatusSet(habitatId, statusPredicate, Integer.MAX_VALUE);
-    }
-
-    private List<TemporalAct> queryByStatusSet(String habitatId, String statusPredicate, int maxRows) {
-        return jdbcTemplate.query(
-            """
-                SELECT temporal_act_id, habitat_id, status, due_at_ms, payload_type, payload_json,
-                       notification_target_ref, created_by_ref_json, topology_version_at_registration,
-                       created_at_ms, updated_at_ms, fired_at_ms, terminal_at_ms, terminal_reason
-                FROM temporal_acts
-                WHERE habitat_id = ? AND
-                """ + statusPredicate + "\nORDER BY due_at_ms ASC LIMIT ?",
+    private List<TemporalAct> terminalQuery(String habitatId, String predicate, int maxResults) {
+        long retentionStartMs = Instant.now(clock).toEpochMilli() - terminalRetentionDays * DAY_MS;
+        return jdbcTemplate.query(selectBase()
+                + " WHERE habitat_id = ? AND " + predicate
+                + " AND terminal_at_ms >= ? ORDER BY terminal_at_ms DESC LIMIT ?",
             (rs, rowNum) -> toTemporalAct(rs),
             habitatId,
-            maxRows
+            retentionStartMs,
+            maxResults
         );
+    }
+
+    private String selectBase() {
+        return """
+            SELECT habitat_id, temporal_act_id, status, payload_kind, due_at_ms,
+                   label, signal_kind, notification_target_ref, created_by_ref,
+                   requested_at_ms, created_at_ms, updated_at_ms, fired_at_ms,
+                   terminal_at_ms, terminal_reason, signal_payload_json
+            FROM temporal_acts
+            """;
     }
 
     private TemporalAct toTemporalAct(ResultSet rs) throws SQLException {
         return new TemporalAct(
-            rs.getString("temporal_act_id"),
+            SQLiteCanonicalIdCodec.fromBlob16(rs.getBytes("temporal_act_id")),
             rs.getString("habitat_id"),
             TemporalActStatus.valueOf(rs.getString("status")),
             Instant.ofEpochMilli(rs.getLong("due_at_ms")),
-            readPayload(rs.getString("payload_type"), rs.getString("payload_json")),
+            readPayload(rs.getString("payload_kind"), rs.getString("signal_payload_json"), rs),
             rs.getString("notification_target_ref"),
-            readJson(rs.getString("created_by_ref_json"), CreatedByRef.class),
-            rs.getString("topology_version_at_registration"),
+            new CreatedByRef(rs.getString("created_by_ref")),
+            null,
             Instant.ofEpochMilli(rs.getLong("created_at_ms")),
             Instant.ofEpochMilli(rs.getLong("updated_at_ms")),
             nullableInstant(rs, "fired_at_ms"),
@@ -336,12 +296,13 @@ public class H2TemporalActRepository implements TemporalActWritePort, TemporalAc
         );
     }
 
-    private TemporalActPayload readPayload(String payloadType, String payloadJson) {
-        return switch (payloadType) {
-            case "SIGNAL" -> readJson(payloadJson, SignalTemporalPayload.class);
-            case "SignalTemporalPayload" -> readJson(payloadJson, SignalTemporalPayload.class);
+    private TemporalActPayload readPayload(String payloadKind, String payloadJson, ResultSet rs) throws SQLException {
+        return switch (payloadKind) {
+            case "SIGNAL" -> payloadJson == null || payloadJson.isBlank()
+                ? new SignalTemporalPayload(rs.getString("label"), rs.getString("signal_kind"))
+                : readJson(payloadJson, SignalTemporalPayload.class);
             default -> {
-                LOGGER.log(System.Logger.Level.WARNING, "Unknown payload kind {0} - act will be quarantined", payloadType);
+                LOGGER.log(System.Logger.Level.WARNING, "Unknown payload kind {0} - act will be quarantined", payloadKind);
                 yield null;
             }
         };
