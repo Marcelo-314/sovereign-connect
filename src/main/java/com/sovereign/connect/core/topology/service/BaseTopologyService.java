@@ -637,6 +637,18 @@ public class BaseTopologyService {
         validateUnique("zoneId", topology.zones().stream().map(ZoneNode::zoneId).toList());
         validateUnique("deviceId", topology.devices().stream().map(DeviceNode::deviceId).toList());
         validateUnique("endpointId", topology.endpoints().stream().map(EndpointNode::endpointId).toList());
+        List<String> capabilityIds = new ArrayList<>();
+        for (DeviceNode device : topology.devices()) {
+            device.deviceCapabilities().stream()
+                .map(CapabilityNode::capabilityId)
+                .forEach(capabilityIds::add);
+        }
+        for (EndpointNode endpoint : topology.endpoints()) {
+            endpoint.capabilities().stream()
+                .map(CapabilityNode::capabilityId)
+                .forEach(capabilityIds::add);
+        }
+        validateUnique("capabilityId", capabilityIds);
 
         Set<String> deviceIds = new HashSet<>(topology.devices().stream().map(DeviceNode::deviceId).toList());
         Set<String> endpointIds = new HashSet<>(topology.endpoints().stream().map(EndpointNode::endpointId).toList());

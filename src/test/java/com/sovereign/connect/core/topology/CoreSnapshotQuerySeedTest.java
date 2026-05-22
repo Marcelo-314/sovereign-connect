@@ -70,7 +70,7 @@ class CoreSnapshotQuerySeedTest {
         );
         mutationService.addEndpointWithResult(
             "habitat-001",
-            endpoint("endpoint.light.kitchen-dimmer", "tuya.dp.2", List.of(levelCapability()))
+            endpoint("endpoint.light.kitchen-dimmer", "tuya.dp.2", List.of(dimmerLevelCapability()))
         );
         repository.saveDeviceState("habitat-001", "device.light.kitchen-main", Map.of("power", "on", "level", 75));
         repository.saveEndpointHealth(
@@ -244,6 +244,15 @@ class CoreSnapshotQuerySeedTest {
         return new CapabilityNode(
             "capability.level",
             "Level",
+            CapabilityKind.LEVEL,
+            new CapabilityTraits(true, true, false)
+        );
+    }
+
+    private CapabilityNode dimmerLevelCapability() {
+        return new CapabilityNode(
+            "capability.level.dimmer",
+            "Dimmer Level",
             CapabilityKind.LEVEL,
             new CapabilityTraits(true, true, false)
         );

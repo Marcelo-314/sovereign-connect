@@ -87,9 +87,10 @@ public class SQLiteEndpointHealthRepository implements EndpointHealthWritePort {
 
     private EndpointHealth toEndpointHealth(ResultSet rs) throws SQLException {
         long lastSeenAtMs = rs.getLong("last_seen_at_ms");
+        boolean lastSeenAtWasNull = rs.wasNull();
         return new EndpointHealth(
             HealthStatus.valueOf(rs.getString("status")),
-            rs.wasNull() ? null : Instant.ofEpochMilli(lastSeenAtMs),
+            lastSeenAtWasNull ? null : Instant.ofEpochMilli(lastSeenAtMs),
             rs.getString("details")
         );
     }

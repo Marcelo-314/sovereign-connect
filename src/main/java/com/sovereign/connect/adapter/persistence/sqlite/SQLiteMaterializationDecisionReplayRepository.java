@@ -13,6 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import javax.sql.DataSource;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -26,10 +27,12 @@ public class SQLiteMaterializationDecisionReplayRepository implements Materializ
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
-    public SQLiteMaterializationDecisionReplayRepository(DataSource dataSource, ObjectMapper objectMapper) {
+    public SQLiteMaterializationDecisionReplayRepository(DataSource dataSource, ObjectMapper objectMapper, Clock clock) {
         this.jdbcTemplate = new JdbcTemplate(Objects.requireNonNull(dataSource, "dataSource is required"));
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper is required");
+        this.clock = Objects.requireNonNull(clock, "clock is required");
     }
 
     @Override
@@ -80,7 +83,7 @@ public class SQLiteMaterializationDecisionReplayRepository implements Materializ
             decision.resultingTopologyVersion().map(TopologyVersion::value).orElse(null),
             writeJson(decision.emittedChanges()),
             decision.reason(),
-            Instant.now().toEpochMilli()
+            Instant.now(clock).toEpochMilli()
         );
     }
 

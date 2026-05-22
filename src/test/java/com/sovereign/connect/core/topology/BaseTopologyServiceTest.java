@@ -212,7 +212,7 @@ class BaseTopologyServiceTest {
 
         HabitatBaseTopology mutated = service.addEndpoint(
             "habitat-001",
-            endpoint("endpoint.light.kitchen-dimmer", "tuya.dp.2", List.of(levelCapability()))
+            endpoint("endpoint.light.kitchen-dimmer", "tuya.dp.2", List.of(dimmerLevelCapability()))
         );
 
         assertThat(mutated.topologyVersion().value()).isEqualTo("2");
@@ -537,6 +537,15 @@ class BaseTopologyServiceTest {
         return new CapabilityNode(
             "capability.level",
             "Level",
+            CapabilityKind.LEVEL,
+            new CapabilityTraits(true, true, false)
+        );
+    }
+
+    private CapabilityNode dimmerLevelCapability() {
+        return new CapabilityNode(
+            "capability.level.dimmer",
+            "Dimmer Level",
             CapabilityKind.LEVEL,
             new CapabilityTraits(true, true, false)
         );
