@@ -64,6 +64,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SQLiteTopologyPersistenceTest {
 
@@ -163,6 +164,56 @@ class SQLiteTopologyPersistenceTest {
     }
 
     @Test
+    void findLocatedDevicesFallsBackToDeviceRoomIdWhenRelationMissing() {
+        Fixture fixture = fixture("located-device-room.sqlite");
+        fixture.baseRepository.save(buildSeedTopology(List.of()));
+
+        assertThat(fixture.baseRepository.findLocatedDevices("habitat-001", "room.kitchen"))
+            .extracting(DeviceNode::deviceId)
+            .containsExactly("device.tuya.light-1");
+    }
+
+    @Test
+    void findLocatedDevicesFallsBackToDeviceZoneIdWhenRelationMissing() {
+        Fixture fixture = fixture("located-device-zone.sqlite");
+        fixture.baseRepository.save(buildSeedTopology(List.of()));
+
+        assertThat(fixture.baseRepository.findLocatedDevices("habitat-001", "zone.kitchen.worktop"))
+            .extracting(DeviceNode::deviceId)
+            .containsExactly("device.tuya.light-1");
+    }
+
+    @Test
+    void findLocatedEndpointsFallsBackToEndpointRoomIdWhenRelationMissing() {
+        Fixture fixture = fixture("located-endpoint-room.sqlite");
+        fixture.baseRepository.save(buildSeedTopology(List.of()));
+
+        assertThat(fixture.baseRepository.findLocatedEndpoints("habitat-001", "room.kitchen"))
+            .extracting(EndpointNode::endpointId)
+            .containsExactly("endpoint.tuya.light-1.switch");
+    }
+
+    @Test
+    void findLocatedEndpointsFallsBackToEndpointZoneIdWhenRelationMissing() {
+        Fixture fixture = fixture("located-endpoint-zone.sqlite");
+        fixture.baseRepository.save(buildSeedTopology(List.of()));
+
+        assertThat(fixture.baseRepository.findLocatedEndpoints("habitat-001", "zone.kitchen.worktop"))
+            .extracting(EndpointNode::endpointId)
+            .containsExactly("endpoint.tuya.light-1.switch");
+    }
+
+    @Test
+    void locatedQueryDeduplicatesRelationAndColumnFallbackMatches() {
+        Fixture fixture = fixture("located-deduplicate.sqlite");
+        fixture.baseRepository.save(buildSeedTopology());
+
+        assertThat(fixture.baseRepository.findLocatedDevices("habitat-001", "room.kitchen"))
+            .extracting(DeviceNode::deviceId)
+            .containsExactly("device.tuya.light-1");
+    }
+
+    @Test
     void coreSnapshotQueryReadsTopologyFromNormalizedSQLite() {
         Fixture fixture = fixture("core-snapshot.sqlite");
         fixture.baseRepository.save(buildSeedTopology());
@@ -209,6 +260,56 @@ class SQLiteTopologyPersistenceTest {
     }
 
     @Test
+    void initialEndpointHealthRoundTripsThroughSQLiteWithoutExplicitHealthWrite() {
+        Fixture fixture = fixture("initial-health.sqlite");
+        EndpointHealth initialHealth = new EndpointHealth(
+            HealthStatus.HEALTHY,
+            Instant.parse("2026-05-22T12:05:00Z"),
+            "initial aggregate health"
+        );
+
+        fixture.baseRepository.save(buildSeedTopology(List.of(), initialHealth));
+
+        assertThat(fixture.baseRepository.findEndpointHealth("habitat-001", "endpoint.tuya.light-1.switch"))
+            .contains(initialHealth);
+        assertThat(fixture.baseRepository.findByHabitatId("habitat-001").orElseThrow().endpoints().get(0).health())
+            .isEqualTo(initialHealth);
+    }
+
+    @Test
+    void structuralSaveDoesNotOverwriteExistingEndpointHealthInSQLite() {
+        Fixture fixture = fixture("preserve-health.sqlite");
+        EndpointHealth staleAggregateHealth = new EndpointHealth(HealthStatus.UNKNOWN, null, "stale aggregate");
+        EndpointHealth durableHealth = new EndpointHealth(
+            HealthStatus.DEGRADED,
+            Instant.parse("2026-05-22T12:06:00Z"),
+            "durable"
+        );
+        fixture.baseRepository.save(buildSeedTopology(List.of(), staleAggregateHealth));
+        fixture.healthRepository.saveEndpointHealth("habitat-001", "endpoint.tuya.light-1.switch", durableHealth);
+
+        fixture.baseRepository.save(buildSeedTopology(List.of(), staleAggregateHealth));
+
+        assertThat(fixture.baseRepository.findEndpointHealth("habitat-001", "endpoint.tuya.light-1.switch"))
+            .contains(durableHealth);
+        assertThat(fixture.baseRepository.findByHabitatId("habitat-001").orElseThrow().endpoints().get(0).health())
+            .isEqualTo(durableHealth);
+    }
+
+    @Test
+    void everyPersistedEndpointGetsEndpointHealthRowIfAbsent() {
+        Fixture fixture = fixture("every-endpoint-health.sqlite");
+
+        fixture.baseRepository.save(buildTwoEndpointTopology());
+
+        Integer healthRows = fixture.jdbc.queryForObject(
+            "SELECT COUNT(*) FROM endpoint_health WHERE habitat_id = 'habitat-001'",
+            Integer.class
+        );
+        assertThat(healthRows).isEqualTo(2);
+    }
+
+    @Test
     void materializationDecisionReplayAndDuplicateFactUseSQLite() {
         Fixture fixture = fixture("materialization.sqlite");
         fixture.baseRepository.save(buildSeedTopology());
@@ -243,6 +344,96 @@ class SQLiteTopologyPersistenceTest {
         assertRowCount(fixture.jdbc, "materialization_decision_replay", 1);
         assertThat(fixture.stateRepository.findDeviceState("habitat-001", "device.tuya.light-1").orElseThrow())
             .containsEntry("power", "on");
+    }
+
+    @Test
+    void duplicateCapabilityIdAcrossOwnersRejectedBeforePersistence() {
+        Fixture fixture = fixture("duplicate-capability.sqlite");
+        BaseTopologyService service = new BaseTopologyService(
+            fixture.baseRepository,
+            fixture.healthRepository,
+            Clock.systemUTC()
+        );
+        String sharedCapabilityId = "capability.shared.power";
+        CapabilityNode deviceCapability = new CapabilityNode(
+            sharedCapabilityId,
+            "Device Power",
+            CapabilityKind.TOGGLE,
+            new CapabilityTraits(true, true, false)
+        );
+        CapabilityNode endpointCapability = new CapabilityNode(
+            sharedCapabilityId,
+            "Endpoint Power",
+            CapabilityKind.TOGGLE,
+            new CapabilityTraits(true, true, false)
+        );
+        TopologyParts parts = topologyParts(List.of(), new EndpointHealth(HealthStatus.UNKNOWN, null, "initial"));
+        DeviceNode device = new DeviceNode(
+            parts.device().deviceId(),
+            parts.device().alias(),
+            parts.device().displayName(),
+            parts.device().roomId(),
+            parts.device().zoneId(),
+            parts.device().kind(),
+            parts.device().provider(),
+            parts.device().endpointIds(),
+            List.of(deviceCapability),
+            parts.device().traits(),
+            parts.device().health(),
+            parts.device().providerRef()
+        );
+        EndpointNode endpoint = new EndpointNode(
+            parts.endpoint().endpointId(),
+            parts.endpoint().deviceId(),
+            parts.endpoint().alias(),
+            parts.endpoint().displayName(),
+            parts.endpoint().kind(),
+            parts.endpoint().roomId(),
+            parts.endpoint().zoneId(),
+            List.of(endpointCapability),
+            parts.endpoint().traits(),
+            parts.endpoint().health(),
+            parts.endpoint().providerRef(),
+            parts.endpoint().metadata()
+        );
+
+        assertThatThrownBy(() -> service.createInitialTopology(
+            "habitat-001",
+            List.of(parts.room()),
+            List.of(parts.zone()),
+            List.of(device),
+            List.of(endpoint)
+        ))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("capabilityId must be unique");
+        assertRowCount(fixture.jdbc, "capabilities", 0);
+    }
+
+    @Test
+    void materializationDecisionReplayUsesInjectedClock() {
+        DataSource dataSource = migratedDataSource("replay-clock.sqlite");
+        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        Clock fixedClock = Clock.fixed(Instant.parse("2026-05-22T12:07:00Z"), java.time.ZoneOffset.UTC);
+        SQLiteMaterializationDecisionReplayRepository repository =
+            new SQLiteMaterializationDecisionReplayRepository(dataSource, objectMapper, fixedClock);
+        UUID factId = UUID.randomUUID();
+
+        repository.recordDecision("habitat-001", factId, new MaterializationDecision(
+            UUID.randomUUID(),
+            factId,
+            "habitat-001",
+            MaterializationDecisionKind.NOOP,
+            java.util.Optional.empty(),
+            java.util.Optional.empty(),
+            List.of(),
+            "clock test"
+        ));
+
+        Long recordedAtMs = new JdbcTemplate(dataSource).queryForObject(
+            "SELECT recorded_at_ms FROM materialization_decision_replay WHERE habitat_id = 'habitat-001'",
+            Long.class
+        );
+        assertThat(recordedAtMs).isEqualTo(fixedClock.instant().toEpochMilli());
     }
 
     @Test
@@ -331,7 +522,7 @@ class SQLiteTopologyPersistenceTest {
         SQLiteTopologyMaterializationStateRepository stateRepository =
             new SQLiteTopologyMaterializationStateRepository(dataSource, objectMapper, baseRepository, healthRepository, clock);
         SQLiteMaterializationDecisionReplayRepository replayRepository =
-            new SQLiteMaterializationDecisionReplayRepository(dataSource, objectMapper);
+            new SQLiteMaterializationDecisionReplayRepository(dataSource, objectMapper, clock);
         return new Fixture(
             dataSource,
             new JdbcTemplate(dataSource),
@@ -355,6 +546,94 @@ class SQLiteTopologyPersistenceTest {
     }
 
     private HabitatBaseTopology buildSeedTopology() {
+        return buildSeedTopology(List.of(defaultRelation()));
+    }
+
+    private HabitatBaseTopology buildSeedTopology(List<TopologySpatialRelation> relations) {
+        return buildSeedTopology(relations, new EndpointHealth(HealthStatus.UNKNOWN, null, "structural stale health"));
+    }
+
+    private HabitatBaseTopology buildSeedTopology(
+        List<TopologySpatialRelation> relations,
+        EndpointHealth endpointHealth
+    ) {
+        TopologyParts parts = topologyParts(relations, endpointHealth);
+        return new HabitatBaseTopology(
+            "habitat-001",
+            TopologyVersion.habitatVersion("habitat-001", 1),
+            List.of(parts.room()),
+            List.of(parts.zone()),
+            List.of(parts.device()),
+            List.of(parts.endpoint()),
+            relations,
+            new TopologyMetadata("base-topology.seed.v1", Instant.parse("2026-05-22T12:00:00Z"), "SC-C", null)
+        );
+    }
+
+    private HabitatBaseTopology buildTwoEndpointTopology() {
+        HabitatBaseTopology topology = buildSeedTopology(List.of());
+        EndpointNode second = new EndpointNode(
+            "endpoint.tuya.light-1.second-switch",
+            "device.tuya.light-1",
+            "Second Switch",
+            "Second Switch",
+            EndpointKind.SWITCH_CHANNEL,
+            "room.kitchen",
+            "zone.kitchen.worktop",
+            List.of(new CapabilityNode(
+                "capability.tuya.light-1.second-switch.power",
+                "Second Power",
+                CapabilityKind.TOGGLE,
+                new CapabilityTraits(true, true, false)
+            )),
+            new EndpointTraits(true, true, true, true, false, false),
+            new EndpointHealth(HealthStatus.DEGRADED, Instant.parse("2026-05-22T12:08:00Z"), "second"),
+            new ProviderEndpointRef("tuya", "light-1", "second-switch", Map.of()),
+            EndpointMetadata.empty()
+        );
+        RoomNode room = new RoomNode(
+            topology.rooms().get(0).roomId(),
+            topology.rooms().get(0).roomName(),
+            topology.rooms().get(0).zoneIds(),
+            topology.rooms().get(0).deviceIds(),
+            List.of("endpoint.tuya.light-1.switch", second.endpointId()),
+            topology.rooms().get(0).traits()
+        );
+        ZoneNode zone = new ZoneNode(
+            topology.zones().get(0).zoneId(),
+            topology.zones().get(0).zoneName(),
+            topology.zones().get(0).roomId(),
+            topology.zones().get(0).deviceIds(),
+            List.of("endpoint.tuya.light-1.switch", second.endpointId()),
+            topology.zones().get(0).traits()
+        );
+        DeviceNode device = new DeviceNode(
+            topology.devices().get(0).deviceId(),
+            topology.devices().get(0).alias(),
+            topology.devices().get(0).displayName(),
+            topology.devices().get(0).roomId(),
+            topology.devices().get(0).zoneId(),
+            topology.devices().get(0).kind(),
+            topology.devices().get(0).provider(),
+            List.of("endpoint.tuya.light-1.switch", second.endpointId()),
+            topology.devices().get(0).deviceCapabilities(),
+            topology.devices().get(0).traits(),
+            topology.devices().get(0).health(),
+            topology.devices().get(0).providerRef()
+        );
+        return new HabitatBaseTopology(
+            topology.habitatId(),
+            topology.topologyVersion(),
+            List.of(room),
+            List.of(zone),
+            List.of(device),
+            List.of(topology.endpoints().get(0), second),
+            topology.spatialRelations(),
+            topology.metadata()
+        );
+    }
+
+    private TopologyParts topologyParts(List<TopologySpatialRelation> relations, EndpointHealth endpointHealth) {
         Instant now = Instant.parse("2026-05-22T12:00:00Z");
         CapabilityNode endpointCap = new CapabilityNode(
             "capability.tuya.light-1.switch.power",
@@ -402,12 +681,12 @@ class SQLiteTopologyPersistenceTest {
             "zone.kitchen.worktop",
             List.of(endpointCap),
             new EndpointTraits(true, true, true, true, false, false),
-            new EndpointHealth(HealthStatus.UNKNOWN, null, "structural stale health"),
+            endpointHealth,
             new ProviderEndpointRef("tuya", "light-1", "switch", Map.of()),
             EndpointMetadata.empty()
         );
         TopologySpatialRelation relation = new TopologySpatialRelation(
-            "relation.located-in.device.device.tuya.light-1.room.room.kitchen",
+            "unused",
             TopologySpatialRelationKind.LOCATED_IN,
             new TopologySpatialSubject(TopologySpatialEntityType.DEVICE, "device.tuya.light-1"),
             new TopologySpatialTarget(TopologySpatialEntityType.ROOM, "room.kitchen"),
@@ -418,15 +697,21 @@ class SQLiteTopologyPersistenceTest {
             now,
             Map.of()
         );
-        return new HabitatBaseTopology(
-            "habitat-001",
-            TopologyVersion.habitatVersion("habitat-001", 1),
-            List.of(room),
-            List.of(zone),
-            List.of(device),
-            List.of(endpoint),
-            List.of(relation),
-            new TopologyMetadata("base-topology.seed.v1", now, "SC-C", null)
+        return new TopologyParts(room, zone, device, endpoint, relation);
+    }
+
+    private TopologySpatialRelation defaultRelation() {
+        return new TopologySpatialRelation(
+            "relation.located-in.device.device.tuya.light-1.room.room.kitchen",
+            TopologySpatialRelationKind.LOCATED_IN,
+            new TopologySpatialSubject(TopologySpatialEntityType.DEVICE, "device.tuya.light-1"),
+            new TopologySpatialTarget(TopologySpatialEntityType.ROOM, "room.kitchen"),
+            true,
+            RelationConfidence.CONFIGURED,
+            SpatialRelationSource.MANUAL,
+            null,
+            Instant.parse("2026-05-22T12:00:00Z"),
+            Map.of()
         );
     }
 
@@ -441,6 +726,15 @@ class SQLiteTopologyPersistenceTest {
         SQLiteEndpointHealthRepository healthRepository,
         SQLiteTopologyMaterializationStateRepository stateRepository,
         SQLiteMaterializationDecisionReplayRepository replayRepository
+    ) {
+    }
+
+    private record TopologyParts(
+        RoomNode room,
+        ZoneNode zone,
+        DeviceNode device,
+        EndpointNode endpoint,
+        TopologySpatialRelation relation
     ) {
     }
 }

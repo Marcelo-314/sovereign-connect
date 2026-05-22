@@ -74,7 +74,7 @@ class PersistenceMemorySeedTest {
 
         TopologyMutationResult mutationResult = firstService.addEndpointWithResult(
             "habitat-001",
-            endpoint("endpoint.light.kitchen-dimmer", "tuya.dp.2", List.of(levelCapability()))
+            endpoint("endpoint.light.kitchen-dimmer", "tuya.dp.2", List.of(dimmerLevelCapability()))
         );
         firstRepository.appendMutationRecord(TopologyMutationRecord.fromResult(
             mutationResult,
@@ -275,6 +275,15 @@ class PersistenceMemorySeedTest {
         return new CapabilityNode(
             "capability.level",
             "Level",
+            CapabilityKind.LEVEL,
+            new CapabilityTraits(true, true, false)
+        );
+    }
+
+    private CapabilityNode dimmerLevelCapability() {
+        return new CapabilityNode(
+            "capability.level.dimmer",
+            "Dimmer Level",
             CapabilityKind.LEVEL,
             new CapabilityTraits(true, true, false)
         );

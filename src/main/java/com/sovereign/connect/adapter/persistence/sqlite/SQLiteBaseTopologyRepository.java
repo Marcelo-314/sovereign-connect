@@ -50,6 +50,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -337,7 +338,9 @@ public class SQLiteBaseTopologyRepository implements BaseTopologyRepository, Cor
 
     @Override
     public List<DeviceNode> findLocatedDevices(String habitatId, String roomOrZoneId) {
-        List<String> deviceIds = locatedSubjectIds(habitatId, TopologySpatialEntityType.DEVICE, roomOrZoneId);
+        Set<String> deviceIds = new LinkedHashSet<>();
+        deviceIds.addAll(locatedSubjectIds(habitatId, TopologySpatialEntityType.DEVICE, roomOrZoneId));
+        deviceIds.addAll(directlyLocatedDeviceIds(habitatId, roomOrZoneId));
         List<EndpointRow> endpointRows = loadEndpointRows(habitatId);
         Map<String, List<CapabilityNode>> capsByOwner = loadCapabilitiesGroupedByOwner(habitatId);
         return deviceIds.stream()
@@ -349,7 +352,9 @@ public class SQLiteBaseTopologyRepository implements BaseTopologyRepository, Cor
 
     @Override
     public List<EndpointNode> findLocatedEndpoints(String habitatId, String roomOrZoneId) {
-        List<String> endpointIds = locatedSubjectIds(habitatId, TopologySpatialEntityType.ENDPOINT, roomOrZoneId);
+        Set<String> endpointIds = new LinkedHashSet<>();
+        endpointIds.addAll(locatedSubjectIds(habitatId, TopologySpatialEntityType.ENDPOINT, roomOrZoneId));
+        endpointIds.addAll(directlyLocatedEndpointIds(habitatId, roomOrZoneId));
         Map<String, List<CapabilityNode>> capsByOwner = loadCapabilitiesGroupedByOwner(habitatId);
         Map<String, EndpointHealth> healthByEndpoint = loadEndpointHealthMap(habitatId);
         EndpointHealth unknownHealth = new EndpointHealth(HealthStatus.UNKNOWN, null, "no durable endpoint health row");
@@ -497,7 +502,28 @@ public class SQLiteBaseTopologyRepository implements BaseTopologyRepository, Cor
                 writeJson(endpoint.providerRef()),
                 writeJson(endpoint.metadata())
             );
+            seedEndpointHealthIfAbsent(topology.habitatId(), endpoint);
         }
+    }
+
+    private void seedEndpointHealthIfAbsent(String habitatId, EndpointNode endpoint) {
+        EndpointHealth health = endpoint.health();
+        if (health == null) {
+            health = new EndpointHealth(HealthStatus.UNKNOWN, null, "seeded default endpoint health");
+        }
+        jdbcTemplate.update(
+            """
+                INSERT OR IGNORE INTO endpoint_health
+                  (habitat_id, endpoint_id, status, last_seen_at_ms, details, updated_at_ms)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+            habitatId,
+            endpoint.endpointId(),
+            health.status().name(),
+            health.lastSeenAt() == null ? null : health.lastSeenAt().toEpochMilli(),
+            health.details(),
+            Instant.now(clock).toEpochMilli()
+        );
     }
 
     private void insertCapabilities(HabitatBaseTopology topology) {
@@ -698,6 +724,38 @@ public class SQLiteBaseTopologyRepository implements BaseTopologyRepository, Cor
         );
     }
 
+    private List<String> directlyLocatedDeviceIds(String habitatId, String roomOrZoneId) {
+        return jdbcTemplate.queryForList(
+            """
+                SELECT device_id
+                FROM devices
+                WHERE habitat_id = ?
+                  AND (room_id = ? OR zone_id = ?)
+                ORDER BY device_id
+                """,
+            String.class,
+            habitatId,
+            roomOrZoneId,
+            roomOrZoneId
+        );
+    }
+
+    private List<String> directlyLocatedEndpointIds(String habitatId, String roomOrZoneId) {
+        return jdbcTemplate.queryForList(
+            """
+                SELECT endpoint_id
+                FROM endpoints
+                WHERE habitat_id = ?
+                  AND (room_id = ? OR zone_id = ?)
+                ORDER BY endpoint_id
+                """,
+            String.class,
+            habitatId,
+            roomOrZoneId,
+            roomOrZoneId
+        );
+    }
+
     private DeviceNode assembleDevice(
         DeviceRow row,
         List<EndpointRow> endpointRows,
@@ -778,9 +836,10 @@ public class SQLiteBaseTopologyRepository implements BaseTopologyRepository, Cor
 
     private EndpointHealth toEndpointHealth(ResultSet rs) throws SQLException {
         long lastSeenAtMs = rs.getLong("last_seen_at_ms");
+        boolean lastSeenAtWasNull = rs.wasNull();
         return new EndpointHealth(
             HealthStatus.valueOf(rs.getString("status")),
-            rs.wasNull() ? null : Instant.ofEpochMilli(lastSeenAtMs),
+            lastSeenAtWasNull ? null : Instant.ofEpochMilli(lastSeenAtMs),
             rs.getString("details")
         );
     }

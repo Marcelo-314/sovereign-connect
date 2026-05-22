@@ -69,9 +69,10 @@ public class TopologyPersistenceConfiguration {
     @Primary
     public SQLiteMaterializationDecisionReplayRepository sqliteMaterializationDecisionReplayRepository(
         DataSource dataSource,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        Clock clock
     ) {
-        return new SQLiteMaterializationDecisionReplayRepository(dataSource, objectMapper);
+        return new SQLiteMaterializationDecisionReplayRepository(dataSource, objectMapper, clock);
     }
 
     @Bean
