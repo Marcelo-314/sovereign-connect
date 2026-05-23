@@ -1,6 +1,5 @@
 package com.sovereign.connect.core.topology;
 
-import com.sovereign.connect.adapter.persistence.H2BaseTopologyRepository;
 import com.sovereign.connect.adapter.persistence.InMemoryBaseTopologyRepository;
 import com.sovereign.connect.adapter.persistence.sqlite.SQLiteBaseTopologyRepository;
 import com.sovereign.connect.adapter.persistence.sqlite.SQLiteEndpointHealthRepository;
@@ -75,15 +74,6 @@ class TopologyPersistenceSpringContextTest {
         assertThat(baseTopologyService).isNotNull();
         assertThat(coreSnapshotQueryService).isNotNull();
         assertThat(topologyMaterializationService).isNotNull();
-    }
-
-    @Test
-    void h2BaseTopologyRepositoryIsNotSelectedInProductionContext() {
-        assertThat(baseTopologyRepository).isNotInstanceOf(H2BaseTopologyRepository.class);
-        assertThat(coreSnapshotReadPort).isNotInstanceOf(H2BaseTopologyRepository.class);
-        assertThat(endpointHealthWritePort).isNotInstanceOf(H2BaseTopologyRepository.class);
-        assertThat(topologyMaterializationStatePort).isNotInstanceOf(H2BaseTopologyRepository.class);
-        assertThat(materializationDecisionReplayPort).isNotInstanceOf(H2BaseTopologyRepository.class);
     }
 
     @Test

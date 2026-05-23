@@ -1,7 +1,7 @@
 package com.sovereign.connect.core.topology;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sovereign.connect.adapter.persistence.H2BaseTopologyRepository;
+import com.sovereign.connect.adapter.persistence.sqlite.SQLiteBaseTopologyRepository;
 import com.sovereign.connect.core.topology.materialization.DefaultTopologyMaterializationService;
 import com.sovereign.connect.core.topology.materialization.DeviceDiscoveryFact;
 import com.sovereign.connect.core.topology.materialization.EndpointDiscoveryFact;
@@ -17,11 +17,11 @@ import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.model.ZoneNode;
 import com.sovereign.connect.core.topology.model.ZoneTraits;
 import com.sovereign.connect.core.topology.service.BaseTopologyService;
+import com.sovereign.connect.testing.SQLiteTestSupport;
+import com.sovereign.connect.testing.SQLiteTestSupport.TopologyFixture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-import javax.sql.DataSource;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -41,15 +41,15 @@ class ConcurrencyIdempotencySeedTest {
 
     @Test
     void sameFactIdReplaysStoredDecisionWithoutVersionAdvance() {
-        String jdbcUrl = jdbcUrl("same-fact-replay");
-        Fixture fixture = placedFixture(jdbcUrl, adapter -> true);
+        String name = "same-fact-replay";
+        Fixture fixture = placedFixture(name, adapter -> true);
         DeviceDiscoveryFact fact = deviceFact(UUID.fromString("00000000-0000-0000-0000-000000001001"));
 
         MaterializationDecision first = fixture.materializer.materialize("habitat-014", fact);
         TopologyVersion afterFirst = fixture.repository.findCurrentVersion("habitat-014").orElseThrow();
         int firstServiceEvents = fixture.service.emittedEvents().size();
 
-        Fixture recovered = placedFixtureWithoutInitializing(jdbcUrl, adapter -> true);
+        Fixture recovered = placedFixtureWithoutInitializing(name, adapter -> true);
         MaterializationDecision replayed = recovered.materializer.materialize("habitat-014", fact);
 
         assertThat(replayed.kind()).isEqualTo(MaterializationDecisionKind.ACCEPT_STRUCTURAL_MUTATION);
@@ -63,12 +63,12 @@ class ConcurrencyIdempotencySeedTest {
 
     @Test
     void replaySurvivesRepositoryAndServiceRecreation() {
-        String jdbcUrl = jdbcUrl("replay-survives");
-        Fixture fixture = placedFixture(jdbcUrl, adapter -> true);
+        String name = "replay-survives";
+        Fixture fixture = placedFixture(name, adapter -> true);
         RoomDiscoveryFact fact = roomFact(UUID.fromString("00000000-0000-0000-0000-000000001002"), "Pantry");
 
         MaterializationDecision first = fixture.materializer.materialize("habitat-014", fact);
-        Fixture recovered = placedFixtureWithoutInitializing(jdbcUrl, adapter -> true);
+        Fixture recovered = placedFixtureWithoutInitializing(name, adapter -> true);
         MaterializationDecision replayed = recovered.materializer.materialize("habitat-014", fact);
 
         assertThat(replayed).isEqualTo(first);
@@ -79,7 +79,7 @@ class ConcurrencyIdempotencySeedTest {
 
     @Test
     void sameCanonicalDeviceDifferentFactIdRejectedAsDuplicate() {
-        Fixture fixture = placedFixture(jdbcUrl("device-duplicate"), adapter -> true);
+        Fixture fixture = placedFixture("device-duplicate", adapter -> true);
         MaterializationDecision first = fixture.materializer.materialize(
             "habitat-014",
             deviceFact(UUID.fromString("00000000-0000-0000-0000-000000001003"))
@@ -99,7 +99,7 @@ class ConcurrencyIdempotencySeedTest {
 
     @Test
     void sameCanonicalRoomDifferentFactIdRejectedAsDuplicate() {
-        Fixture fixture = emptyFixture(jdbcUrl("room-duplicate"), adapter -> true);
+        Fixture fixture = emptyFixture("room-duplicate", adapter -> true);
         MaterializationDecision first = fixture.materializer.materialize(
             "habitat-014",
             roomFact(UUID.fromString("00000000-0000-0000-0000-000000001005"), "Kitchen")
@@ -119,7 +119,7 @@ class ConcurrencyIdempotencySeedTest {
 
     @Test
     void sameCanonicalZoneDifferentFactIdRejectedAsDuplicate() {
-        Fixture fixture = placedFixture(jdbcUrl("zone-duplicate"), adapter -> true);
+        Fixture fixture = placedFixture("zone-duplicate", adapter -> true);
         MaterializationDecision first = fixture.materializer.materialize(
             "habitat-014",
             zoneFact(UUID.fromString("00000000-0000-0000-0000-000000001007"), "room.kitchen", "Worktop")
@@ -139,13 +139,13 @@ class ConcurrencyIdempotencySeedTest {
 
     @Test
     void rejectedDecisionIsReplayable() {
-        String jdbcUrl = jdbcUrl("rejected-replay");
-        Fixture denied = placedFixture(jdbcUrl, adapter -> false);
+        String name = "rejected-replay";
+        Fixture denied = placedFixture(name, adapter -> false);
         TopologyVersion before = denied.repository.findCurrentVersion("habitat-014").orElseThrow();
         DeviceDiscoveryFact fact = deviceFact(UUID.fromString("00000000-0000-0000-0000-000000001009"));
 
         MaterializationDecision rejected = denied.materializer.materialize("habitat-014", fact);
-        Fixture admittedAfterRecreation = placedFixtureWithoutInitializing(jdbcUrl, adapter -> true);
+        Fixture admittedAfterRecreation = placedFixtureWithoutInitializing(name, adapter -> true);
         MaterializationDecision replayed = admittedAfterRecreation.materializer.materialize("habitat-014", fact);
 
         assertThat(rejected.kind()).isEqualTo(MaterializationDecisionKind.REJECT_UNAUTHORIZED_ADAPTER);
@@ -157,7 +157,7 @@ class ConcurrencyIdempotencySeedTest {
 
     @Test
     void validAfterRevalidationRemainsNonRejection() {
-        Fixture fixture = placedFixture(jdbcUrl("valid-after-revalidation"), adapter -> true);
+        Fixture fixture = placedFixture("valid-after-revalidation", adapter -> true);
         fixture.materializer.materialize(
             "habitat-014",
             deviceFact(UUID.fromString("00000000-0000-0000-0000-000000001010"))
@@ -185,7 +185,7 @@ class ConcurrencyIdempotencySeedTest {
 
     @Test
     void wrongHabitatScopeReturnsConflict() {
-        Fixture fixture = placedFixture(jdbcUrl("wrong-scope"), adapter -> true);
+        Fixture fixture = placedFixture("wrong-scope", adapter -> true);
         fixture.materializer.materialize(
             "habitat-014",
             deviceFact(UUID.fromString("00000000-0000-0000-0000-000000001013"))
@@ -206,14 +206,14 @@ class ConcurrencyIdempotencySeedTest {
         )).isEqualTo(TargetValidationResult.TOPOLOGY_VERSION_CONFLICT);
     }
 
-    private Fixture emptyFixture(String jdbcUrl, java.util.function.Predicate<String> admittedAdapterPredicate) {
-        Fixture fixture = placedFixtureWithoutInitializing(jdbcUrl, admittedAdapterPredicate);
+    private Fixture emptyFixture(String name, java.util.function.Predicate<String> admittedAdapterPredicate) {
+        Fixture fixture = placedFixtureWithoutInitializing(name, admittedAdapterPredicate);
         fixture.service.createInitialTopology("habitat-014", List.of(), List.of(), List.of(), List.of());
         return fixture;
     }
 
-    private Fixture placedFixture(String jdbcUrl, java.util.function.Predicate<String> admittedAdapterPredicate) {
-        Fixture fixture = placedFixtureWithoutInitializing(jdbcUrl, admittedAdapterPredicate);
+    private Fixture placedFixture(String name, java.util.function.Predicate<String> admittedAdapterPredicate) {
+        Fixture fixture = placedFixtureWithoutInitializing(name, admittedAdapterPredicate);
         fixture.service.createInitialTopology(
             "habitat-014",
             List.of(room()),
@@ -224,17 +224,9 @@ class ConcurrencyIdempotencySeedTest {
         return fixture;
     }
 
-    private Fixture placedFixtureWithoutInitializing(String jdbcUrl, java.util.function.Predicate<String> admittedAdapterPredicate) {
-        H2BaseTopologyRepository repository = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
-        BaseTopologyService service = new BaseTopologyService(repository, repository, clock);
-        DefaultTopologyMaterializationService materializer = new DefaultTopologyMaterializationService(
-            service,
-            repository,
-            admittedAdapterPredicate,
-            repository,
-            clock
-        );
-        return new Fixture(repository, service, materializer);
+    private Fixture placedFixtureWithoutInitializing(String name, java.util.function.Predicate<String> admittedAdapterPredicate) {
+        TopologyFixture topology = SQLiteTestSupport.topologyFixture(tempDir, name, clock, admittedAdapterPredicate);
+        return new Fixture(topology.repository(), topology.service(), topology.materializer());
     }
 
     private RoomNode room() {
@@ -322,17 +314,8 @@ class ConcurrencyIdempotencySeedTest {
         return new ObjectMapper().findAndRegisterModules();
     }
 
-    private String jdbcUrl(String name) {
-        String dbPath = tempDir.resolve(name).toAbsolutePath().toString().replace('\\', '/');
-        return "jdbc:h2:file:" + dbPath + ";DB_CLOSE_DELAY=0";
-    }
-
-    private DataSource dataSource(String jdbcUrl) {
-        return new DriverManagerDataSource(jdbcUrl, "sa", "");
-    }
-
     private record Fixture(
-        H2BaseTopologyRepository repository,
+        SQLiteBaseTopologyRepository repository,
         BaseTopologyService service,
         DefaultTopologyMaterializationService materializer
     ) {
