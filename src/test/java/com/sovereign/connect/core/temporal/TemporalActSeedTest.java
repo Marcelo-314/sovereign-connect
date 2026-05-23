@@ -1,8 +1,7 @@
 package com.sovereign.connect.core.temporal;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sovereign.connect.adapter.persistence.H2BaseTopologyRepository;
-import com.sovereign.connect.adapter.persistence.H2TemporalActRepository;
+import com.sovereign.connect.adapter.persistence.legacy.H2TemporalActRepository;
 import com.sovereign.connect.core.scledger.model.LedgerEntry;
 import com.sovereign.connect.core.scledger.model.LedgerRecordClass;
 import com.sovereign.connect.core.scledger.model.SemanticKind;
@@ -15,6 +14,9 @@ import com.sovereign.connect.core.temporal.port.TemporalActWritePort;
 import com.sovereign.connect.core.temporal.service.TemporalActService;
 import com.sovereign.connect.core.temporal.service.TemporalEngineRunner;
 import com.sovereign.connect.core.temporal.service.TemporalEngineService;
+import com.sovereign.connect.testing.SQLiteTestSupport;
+import com.sovereign.connect.testing.SQLiteTestSupport.LedgerFixture;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -41,6 +43,9 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@Tag("legacy-h2")
+// LEGACY-H2-TEMPORAL: H2TemporalActRepository is retained only as a legacy
+// seed fixture. This class is not production persistence evidence.
 class TemporalActSeedTest {
 
     @TempDir
@@ -88,7 +93,7 @@ class TemporalActSeedTest {
             "habitat-005", signalPayload(), Instant.parse("2026-05-18T12:05:00Z"), null, createdBy()
         );
 
-        assertThat(ledgerCount(fixture.jdbcUrl, "habitat-005", "temporal-act-created:" + id)).isEqualTo(1);
+        assertThat(ledgerCount(fixture, "habitat-005", "temporal-act-created:" + id)).isEqualTo(1);
     }
 
     @Test
@@ -100,7 +105,7 @@ class TemporalActSeedTest {
         );
 
         assertThat(fixture.repository.findById("habitat-005", id)).isPresent();
-        assertThat(ledgerCount(fixture.jdbcUrl, "habitat-005", "temporal-act-created:" + id)).isEqualTo(1);
+        assertThat(ledgerCount(fixture, "habitat-005", "temporal-act-created:" + id)).isEqualTo(1);
     }
 
     @Test
@@ -116,7 +121,7 @@ class TemporalActSeedTest {
         assertThat(cancelled).isEqualTo(1);
         assertThat(act.status()).isEqualTo(TemporalActStatus.CANCELLED);
         assertThat(act.terminalAt()).isEqualTo(Instant.parse("2026-05-18T12:01:00Z"));
-        assertThat(ledgerCount(fixture.jdbcUrl, "habitat-005", "temporal-act-cancelled:" + id)).isEqualTo(1);
+        assertThat(ledgerCount(fixture, "habitat-005", "temporal-act-cancelled:" + id)).isEqualTo(1);
     }
 
     @Test
@@ -129,7 +134,7 @@ class TemporalActSeedTest {
 
         assertThat(cancelled).isZero();
         assertThat(fixture.repository.findById("habitat-005", id).orElseThrow().status()).isEqualTo(TemporalActStatus.FIRED);
-        assertThat(ledgerCount(fixture.jdbcUrl, "habitat-005", "temporal-act-cancelled:" + id)).isZero();
+        assertThat(ledgerCount(fixture, "habitat-005", "temporal-act-cancelled:" + id)).isZero();
     }
 
     @Test
@@ -141,8 +146,8 @@ class TemporalActSeedTest {
         fixture.engine.fireDueTemporalActOnce("habitat-005", id, Instant.parse("2026-05-18T12:00:00Z"));
 
         assertThat(fixture.repository.findById("habitat-005", id).orElseThrow().status()).isEqualTo(TemporalActStatus.CANCELLED);
-        assertThat(ledgerCount(fixture.jdbcUrl, "habitat-005", "temporal-act-fired:" + id)).isZero();
-        assertThat(outboxCount(fixture.jdbcUrl, "habitat-005", "timer-fired-signal:" + id)).isZero();
+        assertThat(ledgerCount(fixture, "habitat-005", "temporal-act-fired:" + id)).isZero();
+        assertThat(outboxCount(fixture, "habitat-005", "timer-fired-signal:" + id)).isZero();
     }
 
     @Test
@@ -186,8 +191,8 @@ class TemporalActSeedTest {
         fixture.engine.fireDueTemporalActOnce("habitat-005", id, Instant.parse("2026-05-18T12:00:00Z"));
 
         assertThat(fixture.repository.findById("habitat-005", id).orElseThrow().status()).isEqualTo(TemporalActStatus.PENDING);
-        assertThat(ledgerCount(fixture.jdbcUrl, "habitat-005", "temporal-act-fired:" + id)).isZero();
-        assertThat(outboxCount(fixture.jdbcUrl, "habitat-005", "timer-fired-signal:" + id)).isZero();
+        assertThat(ledgerCount(fixture, "habitat-005", "temporal-act-fired:" + id)).isZero();
+        assertThat(outboxCount(fixture, "habitat-005", "timer-fired-signal:" + id)).isZero();
     }
 
     @Test
@@ -199,8 +204,8 @@ class TemporalActSeedTest {
         fixture.engine.fireDueTemporalActOnce("habitat-005", id, Instant.parse("2026-05-18T12:00:01Z"));
 
         assertThat(fixture.repository.findById("habitat-005", id).orElseThrow().status()).isEqualTo(TemporalActStatus.FIRED);
-        assertThat(ledgerCount(fixture.jdbcUrl, "habitat-005", "temporal-act-fired:" + id)).isEqualTo(1);
-        assertThat(outboxCount(fixture.jdbcUrl, "habitat-005", "timer-fired-signal:" + id)).isEqualTo(1);
+        assertThat(ledgerCount(fixture, "habitat-005", "temporal-act-fired:" + id)).isEqualTo(1);
+        assertThat(outboxCount(fixture, "habitat-005", "timer-fired-signal:" + id)).isEqualTo(1);
     }
 
     @Test
@@ -210,8 +215,8 @@ class TemporalActSeedTest {
 
         fixture.engine.fireDueTemporalActOnce("habitat-005", id, Instant.parse("2026-05-18T12:00:00Z"));
 
-        assertThat(ledgerCount(fixture.jdbcUrl, "habitat-005", "temporal-act-fired:" + id)).isEqualTo(1);
-        assertThat(semanticKind(fixture.jdbcUrl, "temporal-act-fired:" + id)).isEqualTo("TIMER_FIRED");
+        assertThat(ledgerCount(fixture, "habitat-005", "temporal-act-fired:" + id)).isEqualTo(1);
+        assertThat(semanticKind(fixture, "temporal-act-fired:" + id)).isEqualTo("TIMER_FIRED");
     }
 
     @Test
@@ -221,8 +226,8 @@ class TemporalActSeedTest {
 
         fixture.engine.fireDueTemporalActOnce("habitat-005", id, Instant.parse("2026-05-18T12:00:00Z"));
 
-        assertThat(outboxCount(fixture.jdbcUrl, "habitat-005", "timer-fired-signal:" + id)).isEqualTo(1);
-        assertThat(outboxStatus(fixture.jdbcUrl, "timer-fired-signal:" + id)).isEqualTo("PENDING");
+        assertThat(outboxCount(fixture, "habitat-005", "timer-fired-signal:" + id)).isEqualTo(1);
+        assertThat(outboxStatus(fixture, "timer-fired-signal:" + id)).isEqualTo("PENDING");
     }
 
     @Test
@@ -232,7 +237,7 @@ class TemporalActSeedTest {
 
         fixture.engine.fireDueTemporalActOnce("habitat-005", id, Instant.parse("2026-05-18T12:00:00Z"));
 
-        assertThat(notificationTargetRef(fixture.jdbcUrl, "timer-fired-signal:" + id)).isEqualTo("surface:bedroom-left");
+        assertThat(notificationTargetRef(fixture, "timer-fired-signal:" + id)).isEqualTo("surface:bedroom-left");
     }
 
     @Test
@@ -245,8 +250,8 @@ class TemporalActSeedTest {
 
         assertThat(fixture.repository.findById("habitat-005", first).orElseThrow().status()).isEqualTo(TemporalActStatus.MISFIRED);
         assertThat(fixture.repository.findById("habitat-005", second).orElseThrow().status()).isEqualTo(TemporalActStatus.MISFIRED);
-        assertThat(ledgerCount(fixture.jdbcUrl, "habitat-005", "temporal-act-misfired:" + first)).isEqualTo(1);
-        assertThat(ledgerCount(fixture.jdbcUrl, "habitat-005", "temporal-act-misfired:" + second)).isEqualTo(1);
+        assertThat(ledgerCount(fixture, "habitat-005", "temporal-act-misfired:" + first)).isEqualTo(1);
+        assertThat(ledgerCount(fixture, "habitat-005", "temporal-act-misfired:" + second)).isEqualTo(1);
     }
 
     @Test
@@ -258,8 +263,8 @@ class TemporalActSeedTest {
         fixture.engine.fireDueTemporalActOnce("habitat-005", id, Instant.parse("2026-05-18T12:01:00Z"));
 
         assertThat(fixture.repository.findById("habitat-005", id).orElseThrow().status()).isEqualTo(TemporalActStatus.MISFIRED);
-        assertThat(ledgerCount(fixture.jdbcUrl, "habitat-005", "temporal-act-fired:" + id)).isZero();
-        assertThat(outboxCount(fixture.jdbcUrl, "habitat-005", "timer-fired-signal:" + id)).isZero();
+        assertThat(ledgerCount(fixture, "habitat-005", "temporal-act-fired:" + id)).isZero();
+        assertThat(outboxCount(fixture, "habitat-005", "timer-fired-signal:" + id)).isZero();
     }
 
     @Test
@@ -295,8 +300,8 @@ class TemporalActSeedTest {
         Fixture recovered = fixture(jdbcUrl);
 
         assertThat(recovered.repository.findById("habitat-005", id).orElseThrow().status()).isEqualTo(TemporalActStatus.FIRED);
-        assertThat(ledgerCount(jdbcUrl, "habitat-005", "temporal-act-fired:" + id)).isEqualTo(1);
-        assertThat(outboxStatus(jdbcUrl, "timer-fired-signal:" + id)).isEqualTo("PENDING");
+        assertThat(ledgerCount(recovered, "habitat-005", "temporal-act-fired:" + id)).isEqualTo(1);
+        assertThat(outboxStatus(recovered, "timer-fired-signal:" + id)).isEqualTo("PENDING");
     }
 
     @Test
@@ -341,7 +346,7 @@ class TemporalActSeedTest {
         assertThat(TemporalActPayload.class.getPermittedSubclasses())
             .extracting(Class::getSimpleName)
             .containsExactly("SignalTemporalPayload");
-        assertThat(notificationTargetRef(fixture.jdbcUrl, "timer-fired-signal:" + id)).isEqualTo("surface:bedroom-left");
+        assertThat(notificationTargetRef(fixture, "timer-fired-signal:" + id)).isEqualTo("surface:bedroom-left");
     }
 
     @Test
@@ -472,12 +477,12 @@ class TemporalActSeedTest {
         DataSource dataSource = dataSource(jdbcUrl);
         ObjectMapper mapper = mapper();
         H2TemporalActRepository repository = new H2TemporalActRepository(dataSource, mapper, clock);
-        H2BaseTopologyRepository ledgerOutboxRepository = new H2BaseTopologyRepository(dataSource, mapper, clock);
+        LedgerFixture ledger = SQLiteTestSupport.ledgerFixture(tempDir, "ledger-" + fixtureName(jdbcUrl));
         TransactionTemplate txTemplate = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         TemporalActService actService = new TemporalActService(
             repository,
             repository,
-            ledgerOutboxRepository,
+            ledger.repository(),
             txTemplate,
             mapper,
             clock
@@ -485,17 +490,17 @@ class TemporalActSeedTest {
         TemporalEngineService engine = new TemporalEngineService(
             repository,
             repository,
-            ledgerOutboxRepository,
-            ledgerOutboxRepository,
+            ledger.repository(),
+            ledger.repository(),
             txTemplate,
             mapper,
             clock
         );
-        return new Fixture(jdbcUrl, repository, actService, engine);
+        return new Fixture(repository, ledger, actService, engine);
     }
 
-    private int ledgerCount(String jdbcUrl, String habitatId, String idempotencyKey) {
-        return jdbc(jdbcUrl).queryForObject(
+    private int ledgerCount(Fixture fixture, String habitatId, String idempotencyKey) {
+        return fixture.ledger().jdbc().queryForObject(
             "SELECT COUNT(*) FROM sc_c_ledger_entries WHERE habitat_id = ? AND idempotency_key = ?",
             Integer.class,
             habitatId,
@@ -503,8 +508,8 @@ class TemporalActSeedTest {
         );
     }
 
-    private int outboxCount(String jdbcUrl, String habitatId, String idempotencyKey) {
-        return jdbc(jdbcUrl).queryForObject(
+    private int outboxCount(Fixture fixture, String habitatId, String idempotencyKey) {
+        return fixture.ledger().jdbc().queryForObject(
             "SELECT COUNT(*) FROM sc_c_outbox_entries WHERE habitat_id = ? AND idempotency_key = ?",
             Integer.class,
             habitatId,
@@ -512,32 +517,28 @@ class TemporalActSeedTest {
         );
     }
 
-    private String semanticKind(String jdbcUrl, String idempotencyKey) {
-        return jdbc(jdbcUrl).queryForObject(
+    private String semanticKind(Fixture fixture, String idempotencyKey) {
+        return fixture.ledger().jdbc().queryForObject(
             "SELECT semantic_kind FROM sc_c_ledger_entries WHERE idempotency_key = ?",
             String.class,
             idempotencyKey
         );
     }
 
-    private String outboxStatus(String jdbcUrl, String idempotencyKey) {
-        return jdbc(jdbcUrl).queryForObject(
+    private String outboxStatus(Fixture fixture, String idempotencyKey) {
+        return fixture.ledger().jdbc().queryForObject(
             "SELECT status FROM sc_c_outbox_entries WHERE idempotency_key = ?",
             String.class,
             idempotencyKey
         );
     }
 
-    private String notificationTargetRef(String jdbcUrl, String idempotencyKey) {
-        return jdbc(jdbcUrl).queryForObject(
+    private String notificationTargetRef(Fixture fixture, String idempotencyKey) {
+        return fixture.ledger().jdbc().queryForObject(
             "SELECT notification_target_ref FROM sc_c_outbox_entries WHERE idempotency_key = ?",
             String.class,
             idempotencyKey
         );
-    }
-
-    private JdbcTemplate jdbc(String jdbcUrl) {
-        return new JdbcTemplate(dataSource(jdbcUrl));
     }
 
     private ObjectMapper mapper() {
@@ -553,9 +554,14 @@ class TemporalActSeedTest {
         return new DriverManagerDataSource(jdbcUrl, "sa", "");
     }
 
+    private String fixtureName(String jdbcUrl) {
+        String path = jdbcUrl.substring("jdbc:h2:file:".length(), jdbcUrl.indexOf(";"));
+        return Path.of(path).getFileName().toString();
+    }
+
     private record Fixture(
-        String jdbcUrl,
         H2TemporalActRepository repository,
+        LedgerFixture ledger,
         TemporalActService actService,
         TemporalEngineService engine
     ) {

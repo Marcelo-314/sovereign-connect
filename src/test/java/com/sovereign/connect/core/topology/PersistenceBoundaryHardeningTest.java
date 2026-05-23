@@ -1,7 +1,6 @@
 package com.sovereign.connect.core.topology;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sovereign.connect.adapter.persistence.H2BaseTopologyRepository;
+import com.sovereign.connect.adapter.persistence.sqlite.SQLiteBaseTopologyRepository;
 import com.sovereign.connect.core.topology.materialization.DefaultTopologyMaterializationService;
 import com.sovereign.connect.core.topology.materialization.DeviceDiscoveryFact;
 import com.sovereign.connect.core.topology.materialization.EndpointDiscoveryFact;
@@ -31,12 +30,11 @@ import com.sovereign.connect.core.topology.model.ZoneNode;
 import com.sovereign.connect.core.topology.model.ZoneTraits;
 import com.sovereign.connect.core.topology.query.CoreSnapshotQueryService;
 import com.sovereign.connect.core.topology.service.BaseTopologyService;
+import com.sovereign.connect.testing.SQLiteTestSupport;
+import com.sovereign.connect.testing.SQLiteTestSupport.TopologyFixture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-import javax.sql.DataSource;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -55,10 +53,10 @@ class PersistenceBoundaryHardeningTest {
     private final Clock clock = Clock.fixed(Instant.parse("2026-05-14T12:00:00Z"), ZoneOffset.UTC);
 
     @Test
-    void structuralSaveDoesNotTouchEndpointHealthTable() {
-        DataSource dataSource = dataSource(jdbcUrl("structural-only"));
-        H2BaseTopologyRepository repository = new H2BaseTopologyRepository(dataSource, mapper(), clock);
-        BaseTopologyService service = new BaseTopologyService(repository, repository, clock);
+    void structuralSaveSeedsEndpointHealthWithoutOverwritingExistingRows() {
+        TopologyFixture fixture = topologyFixture("structural-only");
+        SQLiteBaseTopologyRepository repository = fixture.repository();
+        BaseTopologyService service = fixture.service();
 
         service.createInitialTopology(
             "habitat-boundary",
@@ -70,22 +68,22 @@ class PersistenceBoundaryHardeningTest {
         HabitatBaseTopology topology = repository.findByHabitatId("habitat-boundary").orElseThrow();
 
         assertThat(repository.findEndpointHealth("habitat-boundary", "endpoint.light.kitchen-main"))
-            .as("structural save must not create endpoint_health rows")
-            .isEmpty();
+            .as("structural save seeds endpoint_health rows for every endpoint")
+            .contains(new EndpointHealth(HealthStatus.HEALTHY, Instant.parse("2026-05-14T11:59:00Z"), "online"));
 
         EndpointHealth degraded = new EndpointHealth(
             HealthStatus.DEGRADED,
             Instant.parse("2026-05-14T11:55:00Z"),
             "durable health"
         );
-        repository.saveEndpointHealth("habitat-boundary", "endpoint.light.kitchen-main", degraded);
+        fixture.healthRepository().saveEndpointHealth("habitat-boundary", "endpoint.light.kitchen-main", degraded);
 
         repository.save(topology);
         assertThat(repository.findEndpointHealth("habitat-boundary", "endpoint.light.kitchen-main"))
             .as("structural save must not overwrite endpoint_health rows")
             .contains(degraded);
 
-        new JdbcTemplate(dataSource).update(
+        fixture.jdbc().update(
             "DELETE FROM endpoint_health WHERE habitat_id = ? AND endpoint_id = ?",
             "habitat-boundary",
             "endpoint.light.kitchen-main"
@@ -93,22 +91,16 @@ class PersistenceBoundaryHardeningTest {
 
         repository.save(topology);
         assertThat(repository.findEndpointHealth("habitat-boundary", "endpoint.light.kitchen-main"))
-            .as("structural save must not recreate missing endpoint_health rows")
-            .isEmpty();
+            .as("structural save recreates missing endpoint_health rows from aggregate health")
+            .contains(new EndpointHealth(HealthStatus.HEALTHY, Instant.parse("2026-05-14T11:59:00Z"), "online"));
     }
 
     @Test
     void initialEndpointHealthIsWrittenOnMaterialization() {
-        String jdbcUrl = jdbcUrl("initial-health");
-        H2BaseTopologyRepository repository = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
-        BaseTopologyService mutationService = new BaseTopologyService(repository, repository, clock);
-        DefaultTopologyMaterializationService materializer = new DefaultTopologyMaterializationService(
-            mutationService,
-            repository,
-            adapterInstanceId -> true,
-            repository,
-            clock
-        );
+        TopologyFixture fixture = topologyFixture("initial-health");
+        SQLiteBaseTopologyRepository repository = fixture.repository();
+        BaseTopologyService mutationService = fixture.service();
+        DefaultTopologyMaterializationService materializer = fixture.materializer();
 
         mutationService.createInitialTopology(
             "habitat-materialized-health",
@@ -137,9 +129,10 @@ class PersistenceBoundaryHardeningTest {
 
     @Test
     void serviceLevelEndpointHealthUpdatePersistsDurablyWithoutSaveSideEffect() {
-        String jdbcUrl = jdbcUrl("service-health");
-        H2BaseTopologyRepository repository = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
-        BaseTopologyService service = new BaseTopologyService(repository, repository, clock);
+        String name = "service-health";
+        TopologyFixture fixture = topologyFixture(name);
+        SQLiteBaseTopologyRepository repository = fixture.repository();
+        BaseTopologyService service = fixture.service();
 
         service.createInitialTopology(
             "habitat-service-health",
@@ -159,7 +152,7 @@ class PersistenceBoundaryHardeningTest {
         repository = null;
         service = null;
 
-        H2BaseTopologyRepository recoveredRepository = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
+        SQLiteBaseTopologyRepository recoveredRepository = topologyFixture(name).repository();
         CoreSnapshotQueryService recoveredQueryService = new CoreSnapshotQueryService(recoveredRepository, clock);
 
         assertThat(recoveredQueryService.findEndpointHealth("habitat-service-health", "endpoint.light.kitchen-main"))
@@ -167,17 +160,8 @@ class PersistenceBoundaryHardeningTest {
         assertThat(recoveredQueryService.findCurrentTopologyVersion("habitat-service-health")).contains(before);
     }
 
-    private ObjectMapper mapper() {
-        return new ObjectMapper().findAndRegisterModules();
-    }
-
-    private String jdbcUrl(String name) {
-        String dbPath = tempDir.resolve(name).toAbsolutePath().toString().replace('\\', '/');
-        return "jdbc:h2:file:" + dbPath + ";DB_CLOSE_DELAY=0";
-    }
-
-    private DataSource dataSource(String jdbcUrl) {
-        return new DriverManagerDataSource(jdbcUrl, "sa", "");
+    private TopologyFixture topologyFixture(String name) {
+        return SQLiteTestSupport.topologyFixture(tempDir, name, clock);
     }
 
     private RoomNode room(List<String> endpointIds) {

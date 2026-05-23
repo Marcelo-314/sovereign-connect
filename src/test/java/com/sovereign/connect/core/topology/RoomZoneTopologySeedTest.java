@@ -1,7 +1,7 @@
 package com.sovereign.connect.core.topology;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sovereign.connect.adapter.persistence.H2BaseTopologyRepository;
+import com.sovereign.connect.adapter.persistence.sqlite.SQLiteBaseTopologyRepository;
 import com.sovereign.connect.core.topology.event.TopologyChangeKind;
 import com.sovereign.connect.core.topology.materialization.DefaultTopologyMaterializationService;
 import com.sovereign.connect.core.topology.materialization.DeviceDiscoveryFact;
@@ -29,11 +29,11 @@ import com.sovereign.connect.core.topology.model.ZoneNode;
 import com.sovereign.connect.core.topology.model.ZoneTraits;
 import com.sovereign.connect.core.topology.query.CoreSnapshotQueryService;
 import com.sovereign.connect.core.topology.service.BaseTopologyService;
+import com.sovereign.connect.testing.SQLiteTestSupport;
+import com.sovereign.connect.testing.SQLiteTestSupport.TopologyFixture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-import javax.sql.DataSource;
 import java.lang.reflect.Constructor;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -169,11 +169,11 @@ class RoomZoneTopologySeedTest {
 
     @Test
     void spatialRelationsPersistAcrossRepositoryRecreation() {
-        String jdbcUrl = jdbcUrl("recovery");
-        Fixture fixture = placedFixtureFromJdbcUrl(jdbcUrl);
+        String name = "recovery";
+        Fixture fixture = placedFixtureFromName(name);
         fixture.materializer.materialize("habitat-013", deviceFact());
 
-        H2BaseTopologyRepository recovered = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
+        SQLiteBaseTopologyRepository recovered = topologyFixture(name).repository();
         CoreSnapshotQueryService recoveredQuery = new CoreSnapshotQueryService(recovered, clock);
 
         assertThat(recoveredQuery.findSpatialRelationsBySubject(
@@ -280,10 +280,10 @@ class RoomZoneTopologySeedTest {
     void materializerHasNoH2FieldOrConstructorOrImport() {
         assertThat(Arrays.stream(DefaultTopologyMaterializationService.class.getDeclaredFields())
             .map(field -> field.getType().getName())
-            .toList()).noneMatch(type -> type.contains("H2BaseTopologyRepository"));
+            .toList()).noneMatch(type -> type.contains("adapter.persistence.H2"));
         assertThat(Arrays.stream(DefaultTopologyMaterializationService.class.getConstructors())
             .map(this::constructorSurface)
-            .toList()).noneMatch(surface -> surface.contains("H2BaseTopologyRepository"));
+            .toList()).noneMatch(surface -> surface.contains("adapter.persistence.H2"));
     }
 
     @Test
@@ -343,31 +343,23 @@ class RoomZoneTopologySeedTest {
     }
 
     private Fixture emptyFixture(String name) {
-        return emptyFixtureFromJdbcUrl(jdbcUrl(name));
+        return emptyFixtureFromName(name);
     }
 
-    private Fixture emptyFixtureFromJdbcUrl(String jdbcUrl) {
-        H2BaseTopologyRepository repository = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
-        BaseTopologyService service = new BaseTopologyService(repository, repository, clock);
-        CoreSnapshotQueryService query = new CoreSnapshotQueryService(repository, clock);
-        DefaultTopologyMaterializationService materializer = new DefaultTopologyMaterializationService(
-            service, repository, adapterInstanceId -> true, repository, clock
-        );
+    private Fixture emptyFixtureFromName(String name) {
+        TopologyFixture topology = topologyFixture(name);
+        BaseTopologyService service = topology.service();
         service.createInitialTopology("habitat-013", List.of(), List.of(), List.of(), List.of());
-        return new Fixture(repository, service, query, materializer);
+        return new Fixture(topology.repository(), service, topology.query(), topology.materializer());
     }
 
     private Fixture placedFixture(String name) {
-        return placedFixtureFromJdbcUrl(jdbcUrl(name));
+        return placedFixtureFromName(name);
     }
 
-    private Fixture placedFixtureFromJdbcUrl(String jdbcUrl) {
-        H2BaseTopologyRepository repository = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
-        BaseTopologyService service = new BaseTopologyService(repository, repository, clock);
-        CoreSnapshotQueryService query = new CoreSnapshotQueryService(repository, clock);
-        DefaultTopologyMaterializationService materializer = new DefaultTopologyMaterializationService(
-            service, repository, adapterInstanceId -> true, repository, clock
-        );
+    private Fixture placedFixtureFromName(String name) {
+        TopologyFixture topology = topologyFixture(name);
+        BaseTopologyService service = topology.service();
         service.createInitialTopology(
             "habitat-013",
             List.of(new RoomNode("room.kitchen", "Kitchen", List.of("zone.kitchen.worktop"), List.of(), List.of(), new RoomTraits(false, false))),
@@ -375,7 +367,7 @@ class RoomZoneTopologySeedTest {
             List.of(),
             List.of()
         );
-        return new Fixture(repository, service, query, materializer);
+        return new Fixture(topology.repository(), service, topology.query(), topology.materializer());
     }
 
     private RoomDiscoveryFact roomFact(String name) {
@@ -432,13 +424,8 @@ class RoomZoneTopologySeedTest {
         return new ObjectMapper().findAndRegisterModules();
     }
 
-    private String jdbcUrl(String name) {
-        String dbPath = tempDir.resolve(name).toAbsolutePath().toString().replace('\\', '/');
-        return "jdbc:h2:file:" + dbPath + ";DB_CLOSE_DELAY=0";
-    }
-
-    private DataSource dataSource(String jdbcUrl) {
-        return new DriverManagerDataSource(jdbcUrl, "sa", "");
+    private TopologyFixture topologyFixture(String name) {
+        return SQLiteTestSupport.topologyFixture(tempDir, name, clock);
     }
 
     private String constructorSurface(Constructor<?> constructor) {
@@ -448,7 +435,7 @@ class RoomZoneTopologySeedTest {
     }
 
     private record Fixture(
-        H2BaseTopologyRepository repository,
+        SQLiteBaseTopologyRepository repository,
         BaseTopologyService service,
         CoreSnapshotQueryService query,
         DefaultTopologyMaterializationService materializer

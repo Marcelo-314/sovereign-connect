@@ -1,4 +1,4 @@
-package com.sovereign.connect.adapter.persistence;
+package com.sovereign.connect.adapter.persistence.legacy;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;

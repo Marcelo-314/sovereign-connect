@@ -1,7 +1,7 @@
 package com.sovereign.connect.core.topology;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sovereign.connect.adapter.persistence.H2BaseTopologyRepository;
+import com.sovereign.connect.adapter.persistence.sqlite.SQLiteBaseTopologyRepository;
 import com.sovereign.connect.core.topology.event.TopologyChangeKind;
 import com.sovereign.connect.core.topology.event.TopologyChanged;
 import com.sovereign.connect.core.topology.materialization.CapabilityDiscoveryFact;
@@ -27,11 +27,11 @@ import com.sovereign.connect.core.topology.model.ZoneTraits;
 import com.sovereign.connect.core.topology.query.CoreSnapshot;
 import com.sovereign.connect.core.topology.query.CoreSnapshotQueryService;
 import com.sovereign.connect.core.topology.service.BaseTopologyService;
+import com.sovereign.connect.testing.SQLiteTestSupport;
+import com.sovereign.connect.testing.SQLiteTestSupport.TopologyFixture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-import javax.sql.DataSource;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -51,17 +51,12 @@ class TopologyMaterializationSeedTest {
 
     @Test
     void materializesTopologyFactsThroughBaseTopologyServiceAndDurableRepository() {
-        String jdbcUrl = jdbcUrl();
-        H2BaseTopologyRepository repository = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
-        BaseTopologyService mutationService = new BaseTopologyService(repository, clock);
-        CoreSnapshotQueryService queryService = new CoreSnapshotQueryService(repository, clock);
-        DefaultTopologyMaterializationService materializationService = new DefaultTopologyMaterializationService(
-            mutationService,
-            repository,
-            adapterInstanceId -> true,
-            repository,
-            clock
-        );
+        String name = "sc-materialization";
+        TopologyFixture fixture = topologyFixture(name);
+        SQLiteBaseTopologyRepository repository = fixture.repository();
+        BaseTopologyService mutationService = fixture.service();
+        CoreSnapshotQueryService queryService = fixture.query();
+        DefaultTopologyMaterializationService materializationService = fixture.materializer();
 
         mutationService.createInitialTopology(
             "habitat-007",
@@ -200,9 +195,9 @@ class TopologyMaterializationSeedTest {
 
         DefaultTopologyMaterializationService deniedMaterializer = new DefaultTopologyMaterializationService(
             mutationService,
-            repository,
+            fixture.stateRepository(),
             adapterInstanceId -> false,
-            repository,
+            fixture.replayRepository(),
             clock
         );
         MaterializationDecision denied = deniedMaterializer.materialize(
@@ -224,6 +219,7 @@ class TopologyMaterializationSeedTest {
         );
         assertRejectedWithoutMutation(denied, MaterializationDecisionKind.REJECT_UNAUTHORIZED_ADAPTER, versionBeforeHealth, queryService);
 
+        fixture.jdbc().update("INSERT OR IGNORE INTO habitats(habitat_id) VALUES (?)", "missing-habitat");
         MaterializationDecision missingHabitat = materializationService.materialize("missing-habitat", deviceFact);
         assertThat(missingHabitat.kind()).isEqualTo(MaterializationDecisionKind.REJECT_INVALID_FACT);
         assertThat(missingHabitat.reason()).isEqualTo("habitat not initialized");
@@ -234,8 +230,9 @@ class TopologyMaterializationSeedTest {
         queryService = null;
         materializationService = null;
 
-        H2BaseTopologyRepository recoveredRepository = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
-        BaseTopologyService recoveredMutationService = new BaseTopologyService(recoveredRepository, clock);
+        TopologyFixture recoveredFixture = topologyFixture(name);
+        SQLiteBaseTopologyRepository recoveredRepository = recoveredFixture.repository();
+        BaseTopologyService recoveredMutationService = recoveredFixture.service();
         CoreSnapshotQueryService recoveredQueryService = new CoreSnapshotQueryService(recoveredRepository, clock);
         CoreSnapshot recovered = recoveredQueryService.findCurrentSnapshot("habitat-007").orElseThrow();
 
@@ -262,25 +259,11 @@ class TopologyMaterializationSeedTest {
 
     @Test
     void endpointHealthSurvivesSubsequentStructuralMutation() {
-        String jdbcUrl = jdbcUrl();
-
-        H2BaseTopologyRepository repository =
-            new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
-
-        BaseTopologyService mutationService =
-            new BaseTopologyService(repository, clock);
-
-        CoreSnapshotQueryService queryService =
-            new CoreSnapshotQueryService(repository, clock);
-
-        DefaultTopologyMaterializationService materializer =
-            new DefaultTopologyMaterializationService(
-                mutationService,
-                repository,
-                id -> true,
-                repository,
-                clock
-            );
+        String name = "sc-materialization-health";
+        TopologyFixture fixture = topologyFixture(name);
+        SQLiteBaseTopologyRepository repository = fixture.repository();
+        BaseTopologyService mutationService = fixture.service();
+        DefaultTopologyMaterializationService materializer = fixture.materializer();
 
         mutationService.createInitialTopology(
             "habitat-overwrite",
@@ -335,11 +318,9 @@ class TopologyMaterializationSeedTest {
 
         repository = null;
         mutationService = null;
-        queryService = null;
         materializer = null;
 
-        H2BaseTopologyRepository newRepo =
-            new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
+        SQLiteBaseTopologyRepository newRepo = topologyFixture(name).repository();
 
         CoreSnapshotQueryService recoveredQueryService =
             new CoreSnapshotQueryService(newRepo, clock);
@@ -393,13 +374,8 @@ class TopologyMaterializationSeedTest {
         return new ObjectMapper().findAndRegisterModules();
     }
 
-    private String jdbcUrl() {
-        String dbPath = tempDir.resolve("sc-materialization").toAbsolutePath().toString().replace('\\', '/');
-        return "jdbc:h2:file:" + dbPath + ";DB_CLOSE_DELAY=0";
-    }
-
-    private DataSource dataSource(String jdbcUrl) {
-        return new DriverManagerDataSource(jdbcUrl, "sa", "");
+    private TopologyFixture topologyFixture(String name) {
+        return SQLiteTestSupport.topologyFixture(tempDir, name, clock);
     }
 
     private RoomNode room() {

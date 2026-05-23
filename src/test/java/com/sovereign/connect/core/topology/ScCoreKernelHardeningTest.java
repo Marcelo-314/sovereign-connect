@@ -1,7 +1,7 @@
 package com.sovereign.connect.core.topology;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sovereign.connect.adapter.persistence.H2BaseTopologyRepository;
+import com.sovereign.connect.adapter.persistence.sqlite.SQLiteBaseTopologyRepository;
 import com.sovereign.connect.core.topology.model.CapabilityKind;
 import com.sovereign.connect.core.topology.model.CapabilityNode;
 import com.sovereign.connect.core.topology.model.CapabilityTraits;
@@ -30,11 +30,11 @@ import com.sovereign.connect.core.topology.query.CoreSnapshotQueryService;
 import com.sovereign.connect.core.topology.query.DeviceSnapshot;
 import com.sovereign.connect.core.topology.query.EndpointSnapshot;
 import com.sovereign.connect.core.topology.service.BaseTopologyService;
+import com.sovereign.connect.testing.SQLiteTestSupport;
+import com.sovereign.connect.testing.SQLiteTestSupport.TopologyFixture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-import javax.sql.DataSource;
 import java.lang.reflect.Constructor;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -55,10 +55,11 @@ class ScCoreKernelHardeningTest {
 
     @Test
     void composedDurableKernelPreservesVersionIdentityStateHealthAndQueryBoundariesAfterRecovery() {
-        String jdbcUrl = jdbcUrl();
-        H2BaseTopologyRepository repository = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
-        BaseTopologyService mutationService = new BaseTopologyService(repository, clock);
-        CoreSnapshotQueryService queryService = new CoreSnapshotQueryService(repository, clock);
+        String name = "sc-kernel";
+        TopologyFixture fixture = topologyFixture(name);
+        SQLiteBaseTopologyRepository repository = fixture.repository();
+        BaseTopologyService mutationService = fixture.service();
+        CoreSnapshotQueryService queryService = fixture.query();
 
         mutationService.createInitialTopology(
             "habitat-001",
@@ -71,8 +72,8 @@ class ScCoreKernelHardeningTest {
             "habitat-001",
             endpoint("endpoint.light.kitchen-dimmer", "tuya.dp.2", List.of(dimmerLevelCapability()))
         );
-        repository.saveDeviceState("habitat-001", "device.light.kitchen-main", Map.of("power", "on", "level", 75));
-        repository.saveEndpointHealth(
+        fixture.stateRepository().saveDeviceState("habitat-001", "device.light.kitchen-main", Map.of("power", "on", "level", 75));
+        fixture.healthRepository().saveEndpointHealth(
             "habitat-001",
             "endpoint.light.kitchen-main",
             new EndpointHealth(HealthStatus.DEGRADED, Instant.parse("2026-05-10T13:59:00Z"), "radio intermittent")
@@ -83,9 +84,10 @@ class ScCoreKernelHardeningTest {
         mutationService = null;
         queryService = null;
 
-        H2BaseTopologyRepository recoveredRepository = new H2BaseTopologyRepository(dataSource(jdbcUrl), mapper(), clock);
+        TopologyFixture recoveredFixture = topologyFixture(name);
+        SQLiteBaseTopologyRepository recoveredRepository = recoveredFixture.repository();
         CoreSnapshotQueryService recoveredQueryService = new CoreSnapshotQueryService(recoveredRepository, clock);
-        BaseTopologyService recoveredMutationService = new BaseTopologyService(recoveredRepository, clock);
+        BaseTopologyService recoveredMutationService = recoveredFixture.service();
 
         TopologyVersion versionBeforeQueries = recoveredQueryService.findCurrentTopologyVersion("habitat-001").orElseThrow();
         CoreSnapshot snapshot = recoveredQueryService.findCurrentSnapshot("habitat-001").orElseThrow();
@@ -104,7 +106,7 @@ class ScCoreKernelHardeningTest {
         assertThat(snapshot.topology().devices()).extracting(DeviceNode::deviceId)
             .containsExactly("device.light.kitchen-main");
         assertThat(snapshot.topology().endpoints()).extracting(EndpointNode::endpointId)
-            .containsExactly("endpoint.light.kitchen-main", "endpoint.light.kitchen-dimmer");
+            .containsExactlyInAnyOrder("endpoint.light.kitchen-main", "endpoint.light.kitchen-dimmer");
 
         assertThat(recoveredQueryService.findDevice("habitat-001", "tuya.device.abc")).isEmpty();
         assertThat(canonicalDevice.device().providerRef().providerDeviceId()).isEqualTo("tuya.device.abc");
@@ -133,10 +135,6 @@ class ScCoreKernelHardeningTest {
                 .anyMatch(surface::contains));
     }
 
-    private ObjectMapper mapper() {
-        return new ObjectMapper().findAndRegisterModules();
-    }
-
     private String constructorSurface(Constructor<?> constructor) {
         return Arrays.stream(constructor.getParameterTypes())
             .map(Class::getName)
@@ -144,13 +142,8 @@ class ScCoreKernelHardeningTest {
             .toLowerCase();
     }
 
-    private String jdbcUrl() {
-        String dbPath = tempDir.resolve("sc-kernel").toAbsolutePath().toString().replace('\\', '/');
-        return "jdbc:h2:file:" + dbPath + ";DB_CLOSE_DELAY=0";
-    }
-
-    private DataSource dataSource(String jdbcUrl) {
-        return new DriverManagerDataSource(jdbcUrl, "sa", "");
+    private TopologyFixture topologyFixture(String name) {
+        return SQLiteTestSupport.topologyFixture(tempDir, name, clock);
     }
 
     private RoomNode room(List<String> endpointIds) {
