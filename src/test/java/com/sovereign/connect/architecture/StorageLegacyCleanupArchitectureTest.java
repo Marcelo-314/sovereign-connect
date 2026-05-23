@@ -122,21 +122,38 @@ class StorageLegacyCleanupArchitectureTest {
     }
 
     @Test
-    void remainingH2TestsAreTaggedLegacyH2() throws IOException {
+    void remainingH2BackedTestsAreTaggedLegacyH2() throws IOException {
         if (!Files.exists(testJava)) {
             return;
         }
+        // This architecture test contains H2-detection strings as source text,
+        // but it is not itself an H2-backed test.
+        String selfName = "StorageLegacyCleanupArchitectureTest.java";
+
         try (Stream<Path> paths = Files.walk(testJava)) {
             List<String> violations = paths
                 .filter(path -> path.toString().endsWith("Test.java"))
-                .filter(path -> containsAny(path, "H2TemporalActRepository", "jdbc:h2:", "import org.h2"))
-                .filter(path -> !containsAny(path, "@Tag(\"legacy-h2\")", "@Tag('legacy-h2')"))
+                .filter(path -> !path.getFileName().toString().equals(selfName))
+                .filter(this::isH2BackedTest)
+                .filter(path -> !hasLegacyH2Tag(path))
                 .map(Path::toString)
                 .toList();
             assertThat(violations)
-                .as("Any remaining H2-backed test must be tagged @Tag(\"legacy-h2\")")
+                .as("Every H2-backed test must declare @Tag(\"legacy-h2\")")
                 .isEmpty();
         }
+    }
+
+    private boolean isH2BackedTest(Path file) {
+        return containsAny(file,
+            "import com.sovereign.connect.adapter.persistence.legacy.H2TemporalActRepository",
+            "new H2TemporalActRepository",
+            "jdbc:h2:",
+            "import org.h2");
+    }
+
+    private boolean hasLegacyH2Tag(Path file) {
+        return containsAny(file, "@Tag(\"legacy-h2\")");
     }
 
     private boolean containsAny(Path file, String... needles) {
