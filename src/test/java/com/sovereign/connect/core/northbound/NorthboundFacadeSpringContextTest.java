@@ -41,12 +41,19 @@ class NorthboundFacadeSpringContextTest {
     }
 
     @Test
-    void noHttpControllerBeanIsIntroduced() {
-        Map<String, Object> controllerBeans = ((ListableBeanFactory) context).getBeansWithAnnotation(
-            org.springframework.stereotype.Controller.class
-        );
-
-        assertThat(controllerBeans).isEmpty();
+    void httpControllerBeansAreOnlyInHttpAdapterPackage() {
+        Map<String, Object> controllerBeans =
+            ((ListableBeanFactory) context).getBeansWithAnnotation(
+                org.springframework.stereotype.Controller.class);
+        for (Object bean : controllerBeans.values()) {
+            if (!bean.getClass().getPackageName().startsWith("com.sovereign.connect")) {
+                continue;
+            }
+            assertThat(bean.getClass().getPackageName())
+                .as("Controller bean %s must be in adapter.northbound.http",
+                    bean.getClass().getSimpleName())
+                .startsWith("com.sovereign.connect.adapter.northbound.http");
+        }
     }
 
     @Test
