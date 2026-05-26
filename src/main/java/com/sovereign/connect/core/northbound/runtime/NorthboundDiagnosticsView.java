@@ -5,15 +5,15 @@ import com.sovereign.connect.core.northbound.ScNorthboundWarning;
 import java.time.Instant;
 import java.util.List;
 
-public record NorthboundDeviceHealthView(
-    String deviceId,
-    String status,
-    String source,
-    int endpointCount,
+public record NorthboundDiagnosticsView(
+    String habitatId,
+    String topologyVersion,
+    NorthboundTemporalRuntimeStatusView temporalEngineStatus,
+    NorthboundMigrationReadinessView migrationReadiness,
     Instant readAt,
     List<ScNorthboundWarning> warnings
 ) {
-    public NorthboundDeviceHealthView {
+    public NorthboundDiagnosticsView {
         warnings = List.copyOf(warnings);
     }
 }

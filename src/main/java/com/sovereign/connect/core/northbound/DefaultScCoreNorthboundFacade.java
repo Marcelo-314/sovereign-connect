@@ -1,7 +1,9 @@
 package com.sovereign.connect.core.northbound;
 
 import com.sovereign.connect.core.northbound.runtime.NorthboundDeviceHealthView;
+import com.sovereign.connect.core.northbound.runtime.NorthboundDiagnosticsView;
 import com.sovereign.connect.core.northbound.runtime.NorthboundEndpointHealthView;
+import com.sovereign.connect.core.northbound.runtime.NorthboundMigrationReadinessView;
 import com.sovereign.connect.core.northbound.runtime.NorthboundRecoveryStatusView;
 import com.sovereign.connect.core.northbound.runtime.NorthboundRuntimeStateView;
 import com.sovereign.connect.core.northbound.runtime.NorthboundTemporalRuntimeStatusView;
@@ -22,7 +24,11 @@ import com.sovereign.connect.core.temporal.application.CreateSignalTemporalActRe
 import com.sovereign.connect.core.temporal.application.TemporalActApplicationPort;
 import com.sovereign.connect.core.temporal.engine.TemporalEngineHealth;
 import com.sovereign.connect.core.temporal.observation.TemporalActObservationPort;
+import com.sovereign.connect.core.topology.model.EndpointHealth;
+import com.sovereign.connect.core.topology.model.HealthStatus;
+import com.sovereign.connect.core.topology.model.TopologyVersion;
 import com.sovereign.connect.core.topology.query.CoreSnapshotQueryService;
+import com.sovereign.connect.core.topology.query.DeviceSnapshot;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -179,9 +185,41 @@ public class DefaultScCoreNorthboundFacade implements ScCoreNorthboundFacade {
 
     @Override
     public ScNorthboundResponse<NorthboundDeviceHealthView> getDeviceHealth(String habitatId, String deviceId) {
-        return ScNorthboundResponse.unknownPendingNormalization(
-            "DEVICE_HEALTH_PENDING_NORMALIZATION",
-            "device health is pending normalized authority"
+        if (!isCanonical(deviceId, "device.")) {
+            return ScNorthboundResponse.invalidCanonicalId("INVALID_DEVICE_ID", "deviceId must be canonical");
+        }
+        return queryService.findDevice(habitatId, deviceId)
+            .map(deviceSnapshot -> deriveDeviceHealth(habitatId, deviceId, deviceSnapshot))
+            .orElseGet(() -> ScNorthboundResponse.notFound("DEVICE_NOT_FOUND", "Device not found: " + deviceId));
+    }
+
+    @Override
+    public ScNorthboundResponse<NorthboundDiagnosticsView> getNorthboundDiagnostics(String habitatId) {
+        String topologyVersion = queryService.findCurrentTopologyVersion(habitatId)
+            .map(TopologyVersion::value)
+            .orElse("UNKNOWN");
+        NorthboundTemporalRuntimeStatusView temporalStatus =
+            NorthboundMapper.toTemporalRuntimeStatusView(habitatId, engineHealth);
+        NorthboundMigrationReadinessView migrationReadiness = new NorthboundMigrationReadinessView(
+            "UNKNOWN_PENDING_NORMALIZATION",
+            "migration.readiness",
+            "No migration readiness read port exists; deferred to future MU."
+        );
+        ScNorthboundWarning migrationWarning = new ScNorthboundWarning(
+            "MIGRATION_READINESS_PENDING_NORMALIZATION",
+            "Migration readiness is not yet exposed through a Northbound-safe port.",
+            "migration.readiness"
+        );
+
+        return ScNorthboundResponse.ok(
+            new NorthboundDiagnosticsView(
+                habitatId,
+                topologyVersion,
+                temporalStatus,
+                migrationReadiness,
+                Instant.now(clock),
+                List.of(migrationWarning)
+            )
         );
     }
 
@@ -299,7 +337,11 @@ public class DefaultScCoreNorthboundFacade implements ScCoreNorthboundFacade {
             case CreateSignalTemporalActResult.IdempotentReplay replay -> ScNorthboundResponse.of(
                 ScNorthboundStatus.ACCEPTED,
                 NorthboundMapper.toTemporalActView(replay.act()),
-                List.of(new ScNorthboundWarning("IDEMPOTENT_REPLAY", "Request already processed")),
+                List.of(new ScNorthboundWarning(
+                    "IDEMPOTENT_REPLAY",
+                    "Request already processed",
+                    "temporal.application"
+                )),
                 null
             );
             case CreateSignalTemporalActResult.Rejected rejected -> ScNorthboundResponse.invalidRequest(
@@ -321,7 +363,11 @@ public class DefaultScCoreNorthboundFacade implements ScCoreNorthboundFacade {
             case CancelTemporalActResult.AlreadyTerminal terminal -> ScNorthboundResponse.of(
                 ScNorthboundStatus.OK,
                 NorthboundMapper.toTemporalActView(terminal.act()),
-                List.of(new ScNorthboundWarning("ALREADY_TERMINAL", "Act was already in terminal state")),
+                List.of(new ScNorthboundWarning(
+                    "ALREADY_TERMINAL",
+                    "Act was already in terminal state",
+                    "temporal.application"
+                )),
                 null
             );
             case CancelTemporalActResult.NotFound notFound -> ScNorthboundResponse.notFound(
@@ -331,7 +377,11 @@ public class DefaultScCoreNorthboundFacade implements ScCoreNorthboundFacade {
             case CancelTemporalActResult.IdempotentReplay replay -> ScNorthboundResponse.of(
                 ScNorthboundStatus.CANCELLED,
                 NorthboundMapper.toTemporalActView(replay.act()),
-                List.of(new ScNorthboundWarning("IDEMPOTENT_REPLAY", "Cancel already recorded")),
+                List.of(new ScNorthboundWarning(
+                    "IDEMPOTENT_REPLAY",
+                    "Cancel already recorded",
+                    "temporal.application"
+                )),
                 null
             );
             case CancelTemporalActResult.Rejected rejected -> ScNorthboundResponse.invalidRequest(
@@ -357,6 +407,12 @@ public class DefaultScCoreNorthboundFacade implements ScCoreNorthboundFacade {
         }
         if (request.dueAt() == null) {
             return ScNorthboundResponse.invalidRequest("INVALID_DUE_AT", "dueAt is required");
+        }
+        if (!request.dueAt().isAfter(Instant.now(clock))) {
+            return ScNorthboundResponse.validationError(
+                "INVALID_DUE_AT",
+                "dueAt must be a future Instant"
+            );
         }
         if (isBlank(request.signalKind())) {
             return ScNorthboundResponse.invalidRequest("INVALID_SIGNAL_KIND", "signalKind is required");
@@ -397,6 +453,54 @@ public class DefaultScCoreNorthboundFacade implements ScCoreNorthboundFacade {
             return DEFAULT_MAX_RESULTS;
         }
         return Math.min(requested, MAX_RESULTS_CAP);
+    }
+
+    private ScNorthboundResponse<NorthboundDeviceHealthView> deriveDeviceHealth(
+        String habitatId,
+        String deviceId,
+        DeviceSnapshot deviceSnapshot
+    ) {
+        List<String> endpointIds = deviceSnapshot.device().endpointIds();
+        int endpointCount = endpointIds.size();
+        Instant readAt = Instant.now(clock);
+        if (endpointIds.isEmpty()) {
+            return ScNorthboundResponse.of(
+                ScNorthboundStatus.UNKNOWN_PENDING_NORMALIZATION,
+                new NorthboundDeviceHealthView(
+                    deviceId,
+                    "UNKNOWN_PENDING_NORMALIZATION",
+                    "UNKNOWN_PENDING_NORMALIZATION",
+                    0,
+                    readAt,
+                    List.of()
+                ),
+                List.of(),
+                null
+            );
+        }
+
+        HealthStatus derived = HealthStatus.HEALTHY;
+        for (String endpointId : endpointIds) {
+            HealthStatus endpointStatus = queryService.findEndpointHealth(habitatId, endpointId)
+                .map(EndpointHealth::status)
+                .orElse(HealthStatus.UNKNOWN);
+            if (endpointStatus == HealthStatus.OFFLINE) {
+                derived = HealthStatus.OFFLINE;
+                break;
+            }
+            if (endpointStatus == HealthStatus.DEGRADED || endpointStatus == HealthStatus.UNKNOWN) {
+                derived = HealthStatus.DEGRADED;
+            }
+        }
+
+        return ScNorthboundResponse.ok(new NorthboundDeviceHealthView(
+            deviceId,
+            derived.name(),
+            "DERIVED_FROM_ENDPOINTS",
+            endpointCount,
+            readAt,
+            List.of()
+        ));
     }
 
     private boolean isCanonicalLocation(String id) {

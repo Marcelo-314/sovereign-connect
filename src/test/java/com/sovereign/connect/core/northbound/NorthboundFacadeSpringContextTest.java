@@ -48,4 +48,14 @@ class NorthboundFacadeSpringContextTest {
 
         assertThat(controllerBeans).isEmpty();
     }
+
+    @Test
+    void getNorthboundDiagnosticsIsAccessibleThroughFacadeBean() {
+        ScCoreNorthboundFacade facade = context.getBean(ScCoreNorthboundFacade.class);
+
+        var response = facade.getNorthboundDiagnostics("habitat-001");
+
+        assertThat(response.status()).isEqualTo(ScNorthboundStatus.OK);
+        assertThat(response.payload().migrationReadiness().status()).isEqualTo("UNKNOWN_PENDING_NORMALIZATION");
+    }
 }
