@@ -1,6 +1,7 @@
 package com.sovereign.connect.core.northbound;
 
 import com.sovereign.connect.core.northbound.runtime.NorthboundDeviceHealthView;
+import com.sovereign.connect.core.northbound.runtime.NorthboundDiagnosticsView;
 import com.sovereign.connect.core.northbound.runtime.NorthboundEndpointHealthView;
 import com.sovereign.connect.core.northbound.runtime.NorthboundRecoveryStatusView;
 import com.sovereign.connect.core.northbound.runtime.NorthboundRuntimeStateView;
@@ -50,6 +51,8 @@ public interface ScCoreNorthboundFacade {
     ScNorthboundResponse<NorthboundRecoveryStatusView> getRecoveryStatus(String habitatId);
 
     ScNorthboundResponse<NorthboundTemporalRuntimeStatusView> getTemporalRuntimeStatus(String habitatId);
+
+    ScNorthboundResponse<NorthboundDiagnosticsView> getNorthboundDiagnostics(String habitatId);
 
     ScNorthboundResponse<NorthboundTemporalActView> createSignalTemporalAct(
         String habitatId,

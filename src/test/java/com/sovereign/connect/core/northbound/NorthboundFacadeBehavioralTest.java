@@ -67,6 +67,7 @@ class NorthboundFacadeBehavioralTest {
     private static final String HABITAT = "habitat-001";
     private static final String DEVICE_ID = "device.tuya.light-1";
     private static final String ENDPOINT_ID = "endpoint.tuya.light-1.main";
+    private static final String SECOND_ENDPOINT_ID = "endpoint.tuya.light-1.aux";
     private static final Instant NOW = Instant.parse("2026-05-25T12:00:00Z");
 
     private final CoreSnapshotQueryService queryService = mock(CoreSnapshotQueryService.class);
@@ -159,6 +160,7 @@ class NorthboundFacadeBehavioralTest {
     void healthAndRuntimeMethodsUseAllowedReadSurfaces() {
         EndpointHealth endpointHealth = new EndpointHealth(HealthStatus.DEGRADED, NOW, "durable");
         when(queryService.findEndpointHealth(HABITAT, ENDPOINT_ID)).thenReturn(Optional.of(endpointHealth));
+        when(queryService.findDevice(HABITAT, DEVICE_ID)).thenReturn(Optional.of(deviceSnapshot()));
         when(queryService.findDeviceState(HABITAT, DEVICE_ID)).thenReturn(Optional.of(Map.of("power", true)));
 
         var endpointHealthResponse = facade.getEndpointHealth(HABITAT, ENDPOINT_ID);
@@ -169,14 +171,108 @@ class NorthboundFacadeBehavioralTest {
 
         assertThat(endpointHealthResponse.status()).isEqualTo(ScNorthboundStatus.OK);
         assertThat(endpointHealthResponse.payload().status()).isEqualTo("DEGRADED");
-        assertThat(deviceHealthResponse.status()).isEqualTo(ScNorthboundStatus.UNKNOWN_PENDING_NORMALIZATION);
+        assertThat(deviceHealthResponse.status()).isEqualTo(ScNorthboundStatus.OK);
+        assertThat(deviceHealthResponse.payload().status()).isEqualTo("DEGRADED");
+        assertThat(deviceHealthResponse.payload().source()).isEqualTo("DERIVED_FROM_ENDPOINTS");
         assertThat(deviceStateResponse.status()).isEqualTo(ScNorthboundStatus.OK);
         assertThat(deviceStateResponse.payload().state()).containsEntry("power", true);
         assertThat(endpointStateResponse.status()).isEqualTo(ScNorthboundStatus.UNSUPPORTED_PROFILE);
         assertThat(recoveryResponse.status()).isEqualTo(ScNorthboundStatus.UNSUPPORTED_PROFILE);
 
-        verify(queryService).findEndpointHealth(HABITAT, ENDPOINT_ID);
+        verify(queryService, times(2)).findEndpointHealth(HABITAT, ENDPOINT_ID);
+        verify(queryService).findDevice(HABITAT, DEVICE_ID);
         verify(queryService).findDeviceState(HABITAT, DEVICE_ID);
+    }
+
+    @Test
+    void deviceHealthDerivedHealthyWhenAllEndpointsHealthy() {
+        when(queryService.findDevice(HABITAT, DEVICE_ID)).thenReturn(Optional.of(deviceSnapshot()));
+        when(queryService.findEndpointHealth(HABITAT, ENDPOINT_ID))
+            .thenReturn(Optional.of(new EndpointHealth(HealthStatus.HEALTHY, NOW, "ok")));
+
+        var response = facade.getDeviceHealth(HABITAT, DEVICE_ID);
+
+        assertThat(response.status()).isEqualTo(ScNorthboundStatus.OK);
+        assertThat(response.payload().status()).isEqualTo("HEALTHY");
+        assertThat(response.payload().source()).isEqualTo("DERIVED_FROM_ENDPOINTS");
+        assertThat(response.payload().endpointCount()).isEqualTo(1);
+        assertThat(response.payload().readAt()).isEqualTo(NOW);
+        verify(queryService).findEndpointHealth(HABITAT, ENDPOINT_ID);
+    }
+
+    @Test
+    void deviceHealthDerivedOfflineWhenAnyEndpointOffline() {
+        when(queryService.findDevice(HABITAT, DEVICE_ID)).thenReturn(Optional.of(deviceSnapshot(List.of(
+            ENDPOINT_ID,
+            SECOND_ENDPOINT_ID
+        ))));
+        when(queryService.findEndpointHealth(HABITAT, ENDPOINT_ID))
+            .thenReturn(Optional.of(new EndpointHealth(HealthStatus.HEALTHY, NOW, "ok")));
+        when(queryService.findEndpointHealth(HABITAT, SECOND_ENDPOINT_ID))
+            .thenReturn(Optional.of(new EndpointHealth(HealthStatus.OFFLINE, NOW, "offline")));
+
+        var response = facade.getDeviceHealth(HABITAT, DEVICE_ID);
+
+        assertThat(response.status()).isEqualTo(ScNorthboundStatus.OK);
+        assertThat(response.payload().status()).isEqualTo("OFFLINE");
+        assertThat(response.payload().source()).isEqualTo("DERIVED_FROM_ENDPOINTS");
+        assertThat(response.payload().endpointCount()).isEqualTo(2);
+        verify(queryService).findEndpointHealth(HABITAT, ENDPOINT_ID);
+        verify(queryService).findEndpointHealth(HABITAT, SECOND_ENDPOINT_ID);
+    }
+
+    @Test
+    void deviceHealthDerivedDegradedWhenEndpointDegradedUnknownOrMissing() {
+        when(queryService.findDevice(HABITAT, DEVICE_ID)).thenReturn(Optional.of(deviceSnapshot(List.of(
+            ENDPOINT_ID,
+            SECOND_ENDPOINT_ID
+        ))));
+        when(queryService.findEndpointHealth(HABITAT, ENDPOINT_ID))
+            .thenReturn(Optional.of(new EndpointHealth(HealthStatus.UNKNOWN, NOW, "unknown")));
+        when(queryService.findEndpointHealth(HABITAT, SECOND_ENDPOINT_ID)).thenReturn(Optional.empty());
+
+        var response = facade.getDeviceHealth(HABITAT, DEVICE_ID);
+
+        assertThat(response.status()).isEqualTo(ScNorthboundStatus.OK);
+        assertThat(response.payload().status()).isEqualTo("DEGRADED");
+        assertThat(response.payload().source()).isEqualTo("DERIVED_FROM_ENDPOINTS");
+        assertThat(response.payload().endpointCount()).isEqualTo(2);
+    }
+
+    @Test
+    void deviceHealthEmptyEndpointSetReturnsUnknownPendingNormalization() {
+        when(queryService.findDevice(HABITAT, DEVICE_ID)).thenReturn(Optional.of(deviceSnapshot(List.of())));
+
+        var response = facade.getDeviceHealth(HABITAT, DEVICE_ID);
+
+        assertThat(response.status()).isEqualTo(ScNorthboundStatus.UNKNOWN_PENDING_NORMALIZATION);
+        assertThat(response.payload().status()).isEqualTo("UNKNOWN_PENDING_NORMALIZATION");
+        assertThat(response.payload().source()).isEqualTo("UNKNOWN_PENDING_NORMALIZATION");
+        assertThat(response.payload().endpointCount()).isZero();
+        assertThat(response.payload().readAt()).isEqualTo(NOW);
+        verify(queryService, never()).findEndpointHealth(any(), any());
+    }
+
+    @Test
+    void diagnosticsContainsMandatoryFields() {
+        engineHealth.transitionTo(TemporalEngineStatus.RUNNING);
+        when(queryService.findCurrentTopologyVersion(HABITAT))
+            .thenReturn(Optional.of(TopologyVersion.habitatVersion(HABITAT, 7)));
+
+        var response = facade.getNorthboundDiagnostics(HABITAT);
+
+        assertThat(response.status()).isEqualTo(ScNorthboundStatus.OK);
+        assertThat(response.payload().habitatId()).isEqualTo(HABITAT);
+        assertThat(response.payload().topologyVersion()).isEqualTo("7");
+        assertThat(response.payload().temporalEngineStatus().engineStatus()).isEqualTo("RUNNING");
+        assertThat(response.payload().migrationReadiness().status()).isEqualTo("UNKNOWN_PENDING_NORMALIZATION");
+        assertThat(response.payload().migrationReadiness().source()).isEqualTo("migration.readiness");
+        assertThat(response.payload().readAt()).isEqualTo(NOW);
+        assertThat(response.payload().warnings())
+            .anySatisfy(warning -> {
+                assertThat(warning.code()).isEqualTo("MIGRATION_READINESS_PENDING_NORMALIZATION");
+                assertThat(warning.source()).isEqualTo("migration.readiness");
+            });
     }
 
     @Test
@@ -222,6 +318,7 @@ class NorthboundFacadeBehavioralTest {
         var replay = facade.createSignalTemporalAct(HABITAT, request);
         assertThat(replay.status()).isEqualTo(ScNorthboundStatus.ACCEPTED);
         assertThat(replay.warnings()).extracting("code").contains("IDEMPOTENT_REPLAY");
+        assertThat(replay.warnings()).extracting("source").contains("temporal.application");
 
         when(applicationPort.createSignalTemporalAct(any()))
             .thenReturn(new CreateSignalTemporalActResult.Rejected(new TemporalRequestRejection(
@@ -327,6 +424,40 @@ class NorthboundFacadeBehavioralTest {
         assertThat(facade.cancelTemporalAct(HABITAT, null).status()).isEqualTo(ScNorthboundStatus.INVALID_REQUEST);
     }
 
+    @Test
+    void createSignalTemporalActWithPastDueAtReturnsValidationError() {
+        var response = facade.createSignalTemporalAct(HABITAT, new NorthboundCreateSignalTemporalActRequest(
+            NOW.minusSeconds(3600),
+            "label",
+            "REMINDER",
+            "notify.user",
+            "user-1",
+            "idem-past"
+        ));
+
+        assertThat(response.status()).isEqualTo(ScNorthboundStatus.VALIDATION_ERROR);
+        assertThat(response.payload()).isNull();
+        assertThat(response.error().code()).isEqualTo("INVALID_DUE_AT");
+        assertThat(response.error().source()).isEqualTo("northbound.validation");
+        verify(applicationPort, never()).createSignalTemporalAct(any());
+    }
+
+    @Test
+    void errorAndWarningSourcesArePopulated() {
+        when(queryService.findDevice(HABITAT, DEVICE_ID)).thenReturn(Optional.empty());
+        TemporalActObservation observation = observation(TemporalActStatus.PENDING);
+        when(applicationPort.createSignalTemporalAct(any()))
+            .thenReturn(new CreateSignalTemporalActResult.IdempotentReplay(observation));
+
+        var notFound = facade.getDevice(HABITAT, DEVICE_ID);
+        var unsupported = facade.getEndpointRuntimeState(HABITAT, ENDPOINT_ID);
+        var replay = facade.createSignalTemporalAct(HABITAT, validCreateRequest());
+
+        assertThat(notFound.error().source()).isEqualTo("northbound.query");
+        assertThat(unsupported.error().source()).isEqualTo("northbound.unsupported_profile");
+        assertThat(replay.warnings()).extracting("source").contains("temporal.application");
+    }
+
     private CoreSnapshot snapshot() {
         HabitatBaseTopology topology = topology();
         return new CoreSnapshot(
@@ -340,7 +471,17 @@ class NorthboundFacadeBehavioralTest {
     }
 
     private DeviceSnapshot deviceSnapshot() {
-        return new DeviceSnapshot(HABITAT, TopologyVersion.habitatVersion(HABITAT, 7), device(), Map.of(), NOW);
+        return deviceSnapshot(List.of(ENDPOINT_ID));
+    }
+
+    private DeviceSnapshot deviceSnapshot(List<String> endpointIds) {
+        return new DeviceSnapshot(
+            HABITAT,
+            TopologyVersion.habitatVersion(HABITAT, 7),
+            device(endpointIds),
+            Map.of(),
+            NOW
+        );
     }
 
     private EndpointSnapshot endpointSnapshot() {
@@ -389,6 +530,10 @@ class NorthboundFacadeBehavioralTest {
     }
 
     private DeviceNode device() {
+        return device(List.of(ENDPOINT_ID));
+    }
+
+    private DeviceNode device(List<String> endpointIds) {
         return new DeviceNode(
             DEVICE_ID,
             "light-1",
@@ -397,7 +542,7 @@ class NorthboundFacadeBehavioralTest {
             "zone.living.main",
             DeviceKind.LIGHT,
             DeviceProvider.TUYA,
-            List.of(ENDPOINT_ID),
+            endpointIds,
             List.of(capability("capability.tuya.light-1.power", "Power", CapabilityKind.BINARY_SWITCH)),
             new DeviceTraits(false, false, false),
             new DeviceHealth(HealthStatus.UNKNOWN, null, null),

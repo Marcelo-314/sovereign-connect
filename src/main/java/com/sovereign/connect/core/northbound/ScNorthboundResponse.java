@@ -41,7 +41,8 @@ public record ScNorthboundResponse<T>(
     }
 
     public static <T> ScNorthboundResponse<T> notFound(String code, String message) {
-        return of(ScNorthboundStatus.NOT_FOUND, null, List.of(), new ScNorthboundError(code, message));
+        return of(ScNorthboundStatus.NOT_FOUND, null, List.of(),
+            new ScNorthboundError(code, message, "northbound.query"));
     }
 
     public static <T> ScNorthboundResponse<T> notFound(String message) {
@@ -49,15 +50,23 @@ public record ScNorthboundResponse<T>(
     }
 
     public static <T> ScNorthboundResponse<T> invalidRequest(String code, String message) {
-        return of(ScNorthboundStatus.INVALID_REQUEST, null, List.of(), new ScNorthboundError(code, message));
+        return of(ScNorthboundStatus.INVALID_REQUEST, null, List.of(),
+            new ScNorthboundError(code, message, "northbound.validation"));
+    }
+
+    public static <T> ScNorthboundResponse<T> validationError(String code, String message) {
+        return of(ScNorthboundStatus.VALIDATION_ERROR, null, List.of(),
+            new ScNorthboundError(code, message, "northbound.validation"));
     }
 
     public static <T> ScNorthboundResponse<T> invalidCanonicalId(String code, String message) {
-        return of(ScNorthboundStatus.INVALID_CANONICAL_ID, null, List.of(), new ScNorthboundError(code, message));
+        return of(ScNorthboundStatus.INVALID_CANONICAL_ID, null, List.of(),
+            new ScNorthboundError(code, message, "northbound.validation"));
     }
 
     public static <T> ScNorthboundResponse<T> unsupportedProfile(String code, String message) {
-        return of(ScNorthboundStatus.UNSUPPORTED_PROFILE, null, List.of(), new ScNorthboundError(code, message));
+        return of(ScNorthboundStatus.UNSUPPORTED_PROFILE, null, List.of(),
+            new ScNorthboundError(code, message, "northbound.unsupported_profile"));
     }
 
     public static <T> ScNorthboundResponse<T> unsupportedProfile(String message) {
@@ -69,7 +78,7 @@ public record ScNorthboundResponse<T>(
             ScNorthboundStatus.UNKNOWN_PENDING_NORMALIZATION,
             null,
             List.of(),
-            new ScNorthboundError(code, message)
+            new ScNorthboundError(code, message, "northbound.pending_normalization")
         );
     }
 
@@ -78,6 +87,7 @@ public record ScNorthboundResponse<T>(
     }
 
     public static <T> ScNorthboundResponse<T> internalError(String code, String message) {
-        return of(ScNorthboundStatus.INTERNAL_ERROR, null, List.of(), new ScNorthboundError(code, message));
+        return of(ScNorthboundStatus.INTERNAL_ERROR, null, List.of(),
+            new ScNorthboundError(code, message, "northbound.internal"));
     }
 }
