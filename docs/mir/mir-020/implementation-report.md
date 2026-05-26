@@ -12,7 +12,7 @@ Slot:        MU-020
 
 ```text
 Branch:          feat/sc-c-mir-020-northbound-facade-hardening
-Commit:          pending
+Commit:          a1c9573
 Author/executor: Marcelo Peressoni / Codex
 Date:            2026-05-25
 Baseline:        MIR-019 northbound facade seed present
