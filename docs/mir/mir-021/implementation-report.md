@@ -13,7 +13,7 @@ Slot:         MU-021
 ```text
 Branch:                         feat/sc-c-mir-021-northbound-http-sse-binding
 Implementation code commit:     59828db
-Implementation evidence commit: pending
+Implementation evidence commit: f367619
 Date:                           2026-05-26
 Executor:                       Codex
 ```
