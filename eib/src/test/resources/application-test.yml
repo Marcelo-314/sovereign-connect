@@ -1,0 +1,9 @@
+sc:
+  eib:
+    northbound:
+      base-url: http://sc-c-mock/sc/v1
+      timeout-ms: 500
+    ref-codec:
+      secret: test-secret-32-chars-for-hmac-256
+    diagnostic-admin:
+      enabled: true
