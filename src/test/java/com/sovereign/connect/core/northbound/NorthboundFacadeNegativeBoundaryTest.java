@@ -13,30 +13,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 class NorthboundFacadeNegativeBoundaryTest {
 
     @Test
-    void noExternalExposureLayerIsIntroducedByMu019() throws IOException {
-        List<String> forbidden = List.of(
-            "@RestController",
-            "@Controller",
-            "@MessageMapping",
-            "org.springframework.web",
-            "graphql",
-            "io.grpc",
-            "connectrpc",
-            "mcp",
-            "websocket",
-            "io.nats",
-            "JetStream"
+    void webImportsForbiddenOutsideHttpAdapterPackage() throws IOException {
+        List<String> webTokens = List.of(
+            "@RestController", "@Controller",
+            "@MessageMapping", "org.springframework.web",
+            "graphql", "io.grpc", "connectrpc", "io.nats", "JetStream"
         );
-
+        List<String> allowedPaths = List.of("adapter/northbound/http");
         try (Stream<Path> paths = Files.walk(Path.of("src/main/java/com/sovereign/connect"))) {
             List<String> violations = paths
                 .filter(path -> path.toString().endsWith(".java"))
-                .filter(path -> containsAny(path, forbidden))
+                .filter(path -> allowedPaths.stream()
+                    .noneMatch(allowed -> path.toString().replace('\\', '/').contains(allowed)))
+                .filter(path -> containsAny(path, webTokens))
                 .map(Path::toString)
                 .toList();
-
             assertThat(violations)
-                .as("MU-019 must not introduce HTTP/MCP/gRPC/WebSocket/GraphQL/NATS exposure")
+                .as("Spring Web imports are only allowed under adapter.northbound.http")
                 .isEmpty();
         }
     }

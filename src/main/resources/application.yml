@@ -8,6 +8,13 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+sc:
+  northbound:
+    http:
+      enabled: true
+      base-path: /sc/v1
+      exposure-profile: local-trusted
+
 sovereign:
   temporal:
     engine:

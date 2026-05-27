@@ -1,6 +1,7 @@
 package com.sovereign.connect.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.sovereign.connect.adapter.persistence.sqlite.PerConnectionPragmaDataSource;
 import com.sovereign.connect.adapter.persistence.sqlite.SQLiteScLedgerOutboxRepository;
 import com.sovereign.connect.adapter.persistence.sqlite.SQLiteTemporalActRepository;
@@ -50,8 +51,11 @@ public class TemporalEngineConfiguration {
     }
 
     @Bean
+    @Primary
     public ObjectMapper objectMapper() {
-        return new ObjectMapper().findAndRegisterModules();
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        return mapper;
     }
 
     @Bean
