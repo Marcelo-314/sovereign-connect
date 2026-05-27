@@ -1,0 +1,17 @@
+server:
+  port: 8081
+
+spring:
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+sc:
+  eib:
+    northbound:
+      base-url: http://localhost:8080/sc/v1
+      timeout-ms: 2000
+    ref-codec:
+      secret: change-me-in-production
+    diagnostic-admin:
+      enabled: false
