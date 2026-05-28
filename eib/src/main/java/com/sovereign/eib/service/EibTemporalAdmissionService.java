@@ -88,6 +88,17 @@ public class EibTemporalAdmissionService {
                     List.of(), error);
         }
 
+        if (!envelopeMapper.isSuccess(visible)) {
+            EibError error = envelopeMapper.mapError(visible.error());
+            String admDecision = mapScStatusToAdmissionStatus(visible.status());
+            return new InteractionAdmissionDecision(
+                    admissionId, admDecision, null,
+                    new CanonicalSubmissionTrace(
+                            ctx.clientRequestRef(), admissionId,
+                            visible.status(), error, List.of()),
+                    envelopeMapper.mapWarnings(visible.warnings()), error);
+        }
+
         return codec.resolveTemporalRef(effectiveRef, habitatId, visible.payload() == null ? List.of() : visible.payload())
                 .map(canonicalId -> {
                     ScEnvelope<NorthboundTemporalActViewDto> envelope;
@@ -113,7 +124,8 @@ public class EibTemporalAdmissionService {
 
     private String mapScStatusToAdmissionStatus(String scStatus) {
         return switch (scStatus) {
-            case "OK", "CREATED", "ACCEPTED", "CANCELLED" -> "ADMITTED";
+            case "OK", "CREATED", "ACCEPTED" -> "ADMITTED";
+            case "CANCELLED" -> "COMPLETED";
             case "NOT_FOUND" -> "REJECTED_NOT_VISIBLE";
             case "INVALID_REQUEST", "INVALID_CANONICAL_ID", "VALIDATION_ERROR" -> "REJECTED_INVALID_REQUEST";
             case "UNSUPPORTED_PROFILE" -> "DEFERRED_UNSUPPORTED_PROFILE";
