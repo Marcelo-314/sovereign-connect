@@ -55,7 +55,7 @@ class EibApiControllerTest {
                         .content(objectMapper.writeValueAsString(new EibTemporalSignalAdmissionRequest(
                                 Instant.parse("2026-01-01T00:00:00Z"), "Wake", "WAKE", "target", "idem"))))
                 .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.status").value("ACCEPTED"))
+                .andExpect(jsonPath("$.status").value("ADMITTED"))
                 .andExpect(jsonPath("$.payload.status").value("ADMITTED"))
                 .andExpect(jsonPath("$.payload.effectiveRef").value("eib.temporal.abc"))
                 .andExpect(jsonPath("$.payload.canonicalTrace.scNorthboundStatus").value("ACCEPTED"))
@@ -65,16 +65,16 @@ class EibApiControllerTest {
     @Test
     void cancelAdmissionReturnsEibResponseWrapperWithNullEffectiveRef() throws Exception {
         when(admissionService.admitTemporalCancellation(eq("habitat.alpha"), eq("eib.temporal.abc"), any(), any()))
-                .thenReturn(new InteractionAdmissionDecision("adm.2", "ADMITTED", null,
+                .thenReturn(new InteractionAdmissionDecision("adm.2", "COMPLETED", null,
                         new CanonicalSubmissionTrace("client", "adm.2", "CANCELLED", null, List.of()),
                         List.of(), null));
 
         mockMvc.perform(post("/eib/v1/habitats/habitat.alpha/temporal-acts/eib.temporal.abc/cancel")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new EibTemporalCancellationAdmissionRequest("idem", "reason"))))
-                .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.status").value("ACCEPTED"))
-                .andExpect(jsonPath("$.payload.status").value("ADMITTED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.payload.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.payload.effectiveRef").value(nullValue()))
                 .andExpect(jsonPath("$.payload.canonicalTrace.scNorthboundStatus").value("CANCELLED"))
                 .andExpect(jsonPath("$.canonicalTrace").value(nullValue()));
@@ -123,5 +123,26 @@ class EibApiControllerTest {
                 .andExpect(jsonPath("$.status").value("UPSTREAM_UNAVAILABLE"))
                 .andExpect(jsonPath("$.payload.status").value("FAILED_UPSTREAM_UNAVAILABLE"))
                 .andExpect(jsonPath("$.payload.effectiveRef").value(nullValue()));
+    }
+
+    @Test
+    void signalAdmissionTimeoutNormalizesToUpstreamUnavailableAtApiLevel() throws Exception {
+        when(admissionService.admitTemporalSignalRequest(eq("habitat.alpha"), any(), any()))
+                .thenReturn(new InteractionAdmissionDecision(
+                        "adm.timeout", "FAILED_UPSTREAM_UNAVAILABLE", null,
+                        new CanonicalSubmissionTrace(
+                                "client", "adm.timeout", "UPSTREAM_UNAVAILABLE",
+                                new EibError("UPSTREAM_UNAVAILABLE", "timeout", "eib.northbound"),
+                                List.of()),
+                        List.of(),
+                        new EibError("UPSTREAM_UNAVAILABLE", "timeout", "eib.northbound")));
+
+        mockMvc.perform(post("/eib/v1/habitats/habitat.alpha/temporal-acts/signal")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new EibTemporalSignalAdmissionRequest(
+                                Instant.parse("2026-01-01T00:00:00Z"), "Wake", "WAKE", "target", "idem"))))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status").value("UPSTREAM_UNAVAILABLE"))
+                .andExpect(jsonPath("$.payload.status").value("FAILED_UPSTREAM_UNAVAILABLE"));
     }
 }

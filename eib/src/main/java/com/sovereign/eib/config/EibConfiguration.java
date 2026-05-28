@@ -5,10 +5,13 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.sovereign.eib.northbound.EibScNorthboundClient;
 import com.sovereign.eib.northbound.RestClientEibScNorthboundClient;
 import com.sovereign.eib.ref.EibEffectiveRefCodec;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestClient;
+
+import java.time.Duration;
 
 @Configuration
 @EnableConfigurationProperties({
@@ -27,7 +30,12 @@ public class EibConfiguration {
 
     @Bean
     public RestClient.Builder eibRestClientBuilder(EibScNorthboundClientProperties props) {
-        return RestClient.builder().baseUrl(props.baseUrl());
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofMillis(props.timeoutMs()));
+        factory.setReadTimeout(Duration.ofMillis(props.timeoutMs()));
+        return RestClient.builder()
+                .baseUrl(props.baseUrl())
+                .requestFactory(factory);
     }
 
     @Bean

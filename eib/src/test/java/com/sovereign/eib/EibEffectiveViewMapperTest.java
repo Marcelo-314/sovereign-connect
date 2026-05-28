@@ -50,4 +50,38 @@ class EibEffectiveViewMapperTest {
         assertThat(view.canonicalEndpointId()).isEqualTo("endpoint.provider.device-1.main");
         assertThat(view.toString()).doesNotContain("raw-endpoint-id");
     }
+
+    @Test
+    void diagnosticRequestedButAdminNotEnabledYieldsOrdinaryMode() {
+        EibRequestContext ctx = new EibRequestContext(
+                "ctx", "actor", "surface", "en",
+                true,
+                false,
+                Instant.now(), "req");
+
+        var device = new NorthboundDeviceViewDto(
+                "device.p.d1", "alias", "Lamp",
+                "room.1", "zone.1", "LIGHT", "p",
+                List.of(), List.of(), "raw-p-id");
+        var view = mapper.device("habitat.alpha", device, List.of(), ctx);
+
+        assertThat(view.canonicalDeviceId()).isNull();
+    }
+
+    @Test
+    void adminEnabledButDiagnosticNotRequestedYieldsOrdinaryMode() {
+        EibRequestContext ctx = new EibRequestContext(
+                "ctx", "actor", "surface", "en",
+                false,
+                false,
+                Instant.now(), "req");
+
+        var device = new NorthboundDeviceViewDto(
+                "device.p.d1", "alias", "Lamp",
+                "room.1", "zone.1", "LIGHT", "p",
+                List.of(), List.of(), "raw-p-id");
+        var view = mapper.device("habitat.alpha", device, List.of(), ctx);
+
+        assertThat(view.canonicalDeviceId()).isNull();
+    }
 }

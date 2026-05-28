@@ -10,7 +10,6 @@ import com.sovereign.eib.domain.InteractionAdmissionDecision;
 import com.sovereign.eib.service.EibTemporalActProjectionService;
 import com.sovereign.eib.service.EibTemporalAdmissionService;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -77,14 +76,7 @@ public class EibTemporalActController {
 
     private ResponseEntity<EibResponse<InteractionAdmissionDecision>> admissionResponse(
             InteractionAdmissionDecision decision) {
-        if ("FAILED_UPSTREAM_UNAVAILABLE".equals(decision.status())) {
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .body(new EibResponse<>("UPSTREAM_UNAVAILABLE", decision,
-                            decision.warnings(), decision.error(), null));
-        }
-        return ResponseEntity.status(HttpStatus.ACCEPTED)
-                .body(new EibResponse<>("ACCEPTED", decision,
-                        decision.warnings(), decision.error(), null));
+        return EibHttpResponseMapper.admissionResponse(decision);
     }
 
     private EibRequestContext ctx(HttpServletRequest request) {
