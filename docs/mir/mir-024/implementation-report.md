@@ -319,3 +319,23 @@ PDR-SOV-SC-B-LIFECYCLE-CHANNEL-001
 PDR-SOV-SC-D-CONFORMANCE-001
 SDD-SOV-SC-B-NATS-CORE-JETSTREAM-001, only after gates
 ```
+
+## Response metadata validation patch
+
+Patch commit: pending final commit hash
+Description: add responseMetadata validation to validateResponse()
+
+Gap closed:
+  EnvelopeValidationService.validateResponse() did not reject
+  null responseMetadata or its required fields.
+
+Changes:
+  EnvelopeValidationService.java - added validateResponseMetadata() private method
+  EnvelopeValidationServiceTest.java - added 5 test methods
+
+Validation:
+  Targeted tests: PASS
+  Full mvn -q test: 294 tests / 0 failures / 0 errors / 0 skipped
+  SC-C baseline (240 tests): still green
+
+MU-SOV-SC-B-ABSTRACT-BUS-SEED-001 closure: Validated L4

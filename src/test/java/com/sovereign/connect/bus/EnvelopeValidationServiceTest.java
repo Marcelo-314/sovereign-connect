@@ -5,10 +5,13 @@ import com.sovereign.connect.bus.contract.ScCommandEnvelope;
 import com.sovereign.connect.bus.contract.ScEventEnvelope;
 import com.sovereign.connect.bus.contract.ScMessageMetadata;
 import com.sovereign.connect.bus.contract.ScResponseEnvelope;
+import com.sovereign.connect.bus.contract.ScResponseKind;
+import com.sovereign.connect.bus.contract.ScResponseMetadata;
 import com.sovereign.connect.bus.runtime.validation.EnvelopeValidationService;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThatNoException;
@@ -58,5 +61,71 @@ class EnvelopeValidationServiceTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.validateResponse(new ScResponseEnvelope<>(ScBusTestSupport.childMetadata(), new TestResponsePayload("x"), ScBusTestSupport.routing(ScBusLane.EVENT), ScBusTestSupport.responseEnvelope().responseMetadata())))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsNullResponseMetadata() {
+        assertThatThrownBy(() -> service.validateResponse(
+                new ScResponseEnvelope<>(
+                    ScBusTestSupport.childMetadata(),
+                    new TestResponsePayload("ok"),
+                    ScBusTestSupport.routing(ScBusLane.RESPONSE),
+                    null)))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsNullRequestMessageIdInResponseMetadata() {
+        var meta = new ScResponseMetadata(
+            null, UUID.randomUUID(),
+            ScResponseKind.EXECUTION_RESULT, true, false, null, List.of());
+        assertThatThrownBy(() -> service.validateResponse(
+                new ScResponseEnvelope<>(
+                    ScBusTestSupport.childMetadata(),
+                    new TestResponsePayload("ok"),
+                    ScBusTestSupport.routing(ScBusLane.RESPONSE),
+                    meta)))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsNullResponseKindInResponseMetadata() {
+        var meta = new ScResponseMetadata(
+            UUID.randomUUID(), UUID.randomUUID(),
+            null, true, false, null, List.of());
+        assertThatThrownBy(() -> service.validateResponse(
+                new ScResponseEnvelope<>(
+                    ScBusTestSupport.childMetadata(),
+                    new TestResponsePayload("ok"),
+                    ScBusTestSupport.routing(ScBusLane.RESPONSE),
+                    meta)))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsNullWarningsListInResponseMetadata() {
+        var meta = new ScResponseMetadata(
+            UUID.randomUUID(), UUID.randomUUID(),
+            ScResponseKind.EXECUTION_RESULT, true, false, null, null);
+        assertThatThrownBy(() -> service.validateResponse(
+                new ScResponseEnvelope<>(
+                    ScBusTestSupport.childMetadata(),
+                    new TestResponsePayload("ok"),
+                    ScBusTestSupport.routing(ScBusLane.RESPONSE),
+                    meta)))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void acceptsEmptyWarningsListInResponseMetadata() {
+        var meta = new ScResponseMetadata(
+            UUID.randomUUID(), UUID.randomUUID(),
+            ScResponseKind.EXECUTION_RESULT, true, false, null, List.of());
+        assertThatNoException().isThrownBy(() -> service.validateResponse(
+                new ScResponseEnvelope<>(
+                    ScBusTestSupport.childMetadata(),
+                    new TestResponsePayload("ok"),
+                    ScBusTestSupport.routing(ScBusLane.RESPONSE),
+                    meta)));
     }
 }
