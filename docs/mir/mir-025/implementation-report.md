@@ -189,7 +189,7 @@ covered by JDBC and architecture tests, and full regression is green with
 
 ```text
 Patch package: PATCH-SOV-SC-B-DISPATCH-STATE-PERSISTENCE-DEVIATION-CLOSURE-001
-Patch commit: pending
+Patch commit: eaf5f25993d42eb8668217bd5d5bc469aab449e6
 Executor: Codex
 Date: 2026-05-29
 Status: Validated L4
