@@ -322,7 +322,7 @@ SDD-SOV-SC-B-NATS-CORE-JETSTREAM-001, only after gates
 
 ## Response metadata validation patch
 
-Patch commit: pending final commit hash
+Patch commit: 02b109ad1b24744981b4c8386a1d987cc7c983b2
 Description: add responseMetadata validation to validateResponse()
 
 Gap closed:
