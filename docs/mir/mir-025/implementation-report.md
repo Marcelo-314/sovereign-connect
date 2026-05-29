@@ -16,7 +16,7 @@ Branch:       feat/sc-b-mir-025-dispatch-state-persistence
 ```text
 Implementation branch: feat/sc-b-mir-025-dispatch-state-persistence
 Implementation commit: fcdbf4d642e08e4592940307d0b6d4b2239047cd
-Evidence/docs commit, if separate: pending
+Evidence/docs commit, if separate: 137ac2dca20f5142885dbd73e609e0b4ed9572cd
 Executor: Codex
 Date: 2026-05-29
 ```
