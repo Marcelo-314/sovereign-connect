@@ -61,7 +61,10 @@ public final class JdbcDispatchStateRepository implements DispatchStateWritePort
         if (targetState == null) {
             throw new IllegalArgumentException("targetState is required");
         }
-        if (targetState == DispatchState.CANCELLED_BY_SUPERSEDE && (evidenceRef == null || evidenceRef.isBlank())) {
+        if (targetState != DispatchState.CANCELLED_BY_SUPERSEDE) {
+            throw new IllegalArgumentException("transitionWithEvidence is only allowed for CANCELLED_BY_SUPERSEDE");
+        }
+        if (evidenceRef == null || evidenceRef.isBlank()) {
             throw new IllegalArgumentException("evidenceRef is required for supersede cancellation");
         }
         return transitionCurrent(dispatchRecordId, targetState, evidenceRef);

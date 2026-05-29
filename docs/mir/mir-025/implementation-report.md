@@ -184,3 +184,87 @@ Rationale: H1 dispatch state persistence is implemented, restart-visible,
 covered by JDBC and architecture tests, and full regression is green with
 315 tests / 0 failures / 0 errors / 0 skipped.
 ```
+
+## 9. Deviation closure patch
+
+```text
+Patch package: PATCH-SOV-SC-B-DISPATCH-STATE-PERSISTENCE-DEVIATION-CLOSURE-001
+Patch commit: pending
+Executor: Codex
+Date: 2026-05-29
+Status: Validated L4
+```
+
+Summary:
+
+```text
+Closed the STOP-1 evidence-transition deviation by restricting
+transitionWithEvidence(...) to CANCELLED_BY_SUPERSEDE only.
+Closed the bus-test datasource deviation by using inline SQLiteDataSource
+and Flyway migration setup inside JdbcDispatchStateRepositoryTest.
+Closed the architecture guard deviation by adding a bus test source check
+that rejects adapter imports and PerConnectionPragmaDataSource references.
+Aligned JdbcDispatchStateRepositoryTest method names with the MIR-025
+patch contract while preserving 14 repository tests.
+No dispatch port contract, runtime service, in-memory repository, migration,
+outbox bridge, broker, or SC-C integration surface was changed.
+```
+
+Changed files:
+
+```text
+M src/main/java/com/sovereign/connect/bus/runtime/persistence/JdbcDispatchStateRepository.java
+M src/test/java/com/sovereign/connect/bus/runtime/persistence/JdbcDispatchStateRepositoryTest.java
+M src/test/java/com/sovereign/connect/bus/ScBusHardeningArchitectureTest.java
+M docs/mir/mir-025/implementation-report.md
+```
+
+New regression evidence:
+
+```text
+JdbcDispatchStateRepositoryTest.transitionWithEvidenceRejectsNonSupersedeTargetState
+ScBusHardeningArchitectureTest.busTestsDoNotDependOnAdapterOwnedInfrastructure
+```
+
+Commands run:
+
+```bash
+mvn -q compile
+mvn -q test -Dtest="JdbcDispatchStateRepositoryTest"
+mvn -q test -Dtest="JdbcDispatchStateRepositoryTest,ScBusHardeningArchitectureTest,ScBusArchitectureTest"
+mvn -q test
+```
+
+Results:
+
+```text
+JdbcDispatchStateRepositoryTest:
+  total:    14
+  failures: 0
+  errors:   0
+  skipped:  0
+
+sovereign-connect tests:
+  total:    317
+  failures: 0
+  errors:   0
+  skipped:  0
+```
+
+Retained debts:
+
+```text
+DEBT-BRD-H-001 - SC-C outbox bridge absent.
+DEBT-BRD-H-002 - ScOutboxDispatchReadPort absent.
+DEBT-BRD-H-003 - integration.scledgerdispatch absent.
+DEBT-BRD-H-004 - Dispatch observation persistence absent.
+DEBT-BRD-H-005 - SIGNAL lane bridge mapping unresolved for execution.
+DEBT-BRD-H-006 - Physical broker binding absent.
+DEBT-BRD-H-007 - SC-D lifecycle channel not implemented.
+```
+
+Final status:
+
+```text
+Validated L4.
+```

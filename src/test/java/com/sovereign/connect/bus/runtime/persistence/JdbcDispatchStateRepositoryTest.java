@@ -2,10 +2,11 @@ package com.sovereign.connect.bus.runtime.persistence;
 
 import com.sovereign.connect.bus.runtime.dispatch.model.DispatchAttempt;
 import com.sovereign.connect.bus.runtime.dispatch.model.DispatchState;
-import com.sovereign.connect.testing.SQLiteTestSupport;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.sqlite.SQLiteDataSource;
 
 import javax.sql.DataSource;
 import java.nio.file.Path;
@@ -61,7 +62,7 @@ class JdbcDispatchStateRepositoryTest {
     }
 
     @Test
-    void deliveryFailedSurvivesRestart() {
+    void dispatchingDeliveryFailedSurvivesRestart() {
         DataSource dataSource = dataSource("failed-restart");
         UUID dispatchRecordId = UUID.randomUUID();
         JdbcDispatchStateRepository repository = new JdbcDispatchStateRepository(dataSource);
@@ -74,7 +75,7 @@ class JdbcDispatchStateRepositoryTest {
     }
 
     @Test
-    void retryFromDeliveryFailedCreatesNewClaimedAttempt() {
+    void retryIncreasesAttemptNumber() {
         DataSource dataSource = dataSource("retry-new-attempt");
         UUID dispatchRecordId = UUID.randomUUID();
         JdbcDispatchStateRepository repository = new JdbcDispatchStateRepository(dataSource);
@@ -130,7 +131,7 @@ class JdbcDispatchStateRepositoryTest {
     }
 
     @Test
-    void supersedeCancellationPersistsEvidenceRefAndTerminalState() {
+    void supersedeCancellationPersistsEvidenceRef() {
         DataSource dataSource = dataSource("supersede-persisted");
         UUID dispatchRecordId = UUID.randomUUID();
         JdbcDispatchStateRepository repository = new JdbcDispatchStateRepository(dataSource);
@@ -155,6 +156,10 @@ class JdbcDispatchStateRepositoryTest {
         JdbcDispatchStateRepository repository = repository("invalid-transitions");
         UUID dispatchRecordId = UUID.randomUUID();
 
+        assertThatThrownBy(() -> repository.claim(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> repository.transition(null, DispatchState.CLAIMED)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> repository.transitionWithEvidence(null, DispatchState.CANCELLED_BY_SUPERSEDE, "evidence"))
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> repository.transition(dispatchRecordId, null)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> repository.transition(dispatchRecordId, DispatchState.DISPATCHED)).isInstanceOf(IllegalStateException.class);
         repository.claim(dispatchRecordId);
@@ -164,16 +169,6 @@ class JdbcDispatchStateRepositoryTest {
     @Test
     void unknownCurrentAttemptReturnsEmpty() {
         assertThat(repository("unknown-current").currentAttempt(UUID.randomUUID())).isEmpty();
-    }
-
-    @Test
-    void nullDispatchRecordIdIsRejectedForClaimAndTransitions() {
-        JdbcDispatchStateRepository repository = repository("null-id");
-
-        assertThatThrownBy(() -> repository.claim(null)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> repository.transition(null, DispatchState.CLAIMED)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> repository.transitionWithEvidence(null, DispatchState.CANCELLED_BY_SUPERSEDE, "evidence"))
-                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -188,6 +183,26 @@ class JdbcDispatchStateRepositoryTest {
         });
     }
 
+    @Test
+    void dispatchStateNamesDoNotEncodeSemanticMeaning() {
+        assertThat(DispatchState.CLAIMED.name()).doesNotContain("ACCEPT");
+        assertThat(DispatchState.DISPATCHED.name()).doesNotContain("SUCCESS");
+        assertThat(DispatchState.EXHAUSTED.name()).doesNotContain("FAILURE");
+    }
+
+    @Test
+    void transitionWithEvidenceRejectsNonSupersedeTargetState() {
+        JdbcDispatchStateRepository repository = repository("evidence-target");
+        UUID dispatchRecordId = UUID.randomUUID();
+        repository.claim(dispatchRecordId);
+
+        assertThatThrownBy(() -> repository.transitionWithEvidence(
+                dispatchRecordId,
+                DispatchState.DISPATCHING,
+                "ledger:unexpected-evidence"
+        )).isInstanceOf(IllegalArgumentException.class);
+    }
+
     private DispatchAttempt failDispatch(JdbcDispatchStateRepository repository, UUID dispatchRecordId) {
         DispatchAttempt claimed = repository.claim(dispatchRecordId);
         repository.transition(dispatchRecordId, DispatchState.DISPATCHING);
@@ -200,7 +215,14 @@ class JdbcDispatchStateRepositoryTest {
     }
 
     private DataSource dataSource(String name) {
-        return SQLiteTestSupport.dataSource(tempDir, name);
+        SQLiteDataSource dataSource = new SQLiteDataSource();
+        dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve(name + ".sqlite").toAbsolutePath());
+        Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+        return dataSource;
     }
 
     private boolean tableExists(JdbcTemplate jdbc, String tableName) {

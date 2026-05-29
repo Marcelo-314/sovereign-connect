@@ -96,6 +96,14 @@ class ScBusHardeningArchitectureTest {
         );
     }
 
+    @Test
+    void busTestsDoNotDependOnAdapterOwnedInfrastructure() throws Exception {
+        assertNoSourceContains(
+                Path.of("src/test/java/com/sovereign/connect/bus"),
+                List.of("com.sovereign.connect." + "adapter", "PerConnection" + "PragmaDataSource")
+        );
+    }
+
     private void assertNoSourceContains(Path root, List<String> forbidden) throws Exception {
         if (!Files.exists(root)) {
             return;
