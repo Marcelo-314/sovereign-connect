@@ -2,5 +2,7 @@ package com.sovereign.connect.core.scledger.model;
 
 public enum DeliveryLane {
     SIGNAL,
-    COMMAND
+    COMMAND,
+    EVENT,
+    RESPONSE
 }
