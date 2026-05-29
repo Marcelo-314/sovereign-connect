@@ -16,7 +16,7 @@ Repository path: docs/mir/mir-024/implementation-report.md
 
 ```text
 Branch: feat/sc-b-mir-024-abstract-bus-seed
-Commit: 3b9e0de58f6781f23ef76064fb0ff4add12291a5
+Commit: 899235a2e094ba4d4adaf4d6f0c6331bfc3560e7
 Author / executor: Codex
 Implementation date: 2026-05-29
 Repository baseline: sovereign-connect-023.zip / post-MU-023
