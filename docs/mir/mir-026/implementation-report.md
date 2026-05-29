@@ -14,7 +14,7 @@ Status:       Validated L4
 
 ```text
 Branch: feat/sc-b-mir-026-outbox-bridge-seed
-Implementation commit: pending
+Implementation commit: 51f3dbda43a93635a6945e22d3e5e2b2837eaec1
 Evidence/docs commit: pending
 Executor: Codex
 Date: 2026-05-29
