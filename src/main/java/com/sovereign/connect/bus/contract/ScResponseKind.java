@@ -1,0 +1,14 @@
+package com.sovereign.connect.bus.contract;
+
+public enum ScResponseKind {
+    VALIDATION_FAILURE,
+    EXECUTION_PROGRESS,
+    EXECUTION_RESULT,
+    READ_RESULT,
+    REFRESH_RESULT,
+    ADMISSION_PROGRESS,
+    ADMISSION_RESULT,
+    LIFECYCLE_PROGRESS,
+    LIFECYCLE_RESULT,
+    IDEMPOTENCY_STATUS
+}
