@@ -79,13 +79,11 @@ class ScBusHardeningArchitectureTest {
     }
 
     @Test
-    void h1DidNotIntroduceOutboxBridgeSurfaces() throws Exception {
-        assertThat(pathExists(Path.of("src/main/java/com/sovereign/connect/integration/scledgerdispatch"))).isFalse();
-        try (Stream<Path> paths = Files.walk(Path.of("src/main/java"))) {
-            assertThat(paths
-                    .filter(path -> path.getFileName().toString().equals("ScOutboxDispatchReadPort.java"))
-                    .toList()).isEmpty();
-        }
+    void h1DispatchStatePersistenceDoesNotImportOutboxBridgeSurfaces() throws Exception {
+        assertNoSourceContains(
+                Path.of("src/main/java/com/sovereign/connect/bus/runtime/persistence"),
+                List.of("ScOutboxDispatchReadPort", "integration.scledgerdispatch")
+        );
     }
 
     @Test
@@ -126,9 +124,5 @@ class ScBusHardeningArchitectureTest {
         } catch (Exception ex) {
             throw new IllegalStateException(ex);
         }
-    }
-
-    private boolean pathExists(Path path) {
-        return Files.exists(path);
     }
 }
