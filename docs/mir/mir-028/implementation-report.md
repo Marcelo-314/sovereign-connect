@@ -17,7 +17,7 @@ MU Slot:      MU-028
 ```text
 Branch: feat/sc-b-mir-028-serialization-utilities-seed
 Implementation commit: 27951ce21cadd30fdff5bcde3b179d26c6290b44
-Evidence/docs commit: TBD
+Evidence/docs commit: fbae4a4cd4c3ceee2d680ad32158a65cb5541b39
 Changed files:
   - docs/mir/mir-028/*
   - src/main/java/com/sovereign/connect/bus/runtime/serialization/ScSubjectIdTokenCodec.java
