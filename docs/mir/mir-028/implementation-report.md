@@ -30,6 +30,7 @@ Changed files:
   - src/main/java/com/sovereign/connect/bus/runtime/serialization/WireEnvelopeValidator.java
   - src/test/java/com/sovereign/connect/bus/runtime/serialization/*
   - src/test/java/com/sovereign/connect/bus/ScBusSerializationArchitectureTest.java
+  - docs/mir/mir-028/patch-opaque-payloadtype-validation/*
 ```
 
 Summary:
@@ -42,6 +43,8 @@ Added NATS-safe subject token validation for future subject construction.
 Added SC-JSON-WIRE-v1 envelope model, payload type registry, JSON codec, and envelope validator.
 Preserved syntactically valid unknown payloadType values opaquely.
 Added focused unit and architecture tests for codec, validation, roundtrip, and dependency boundaries.
+Patch PATCH-SOV-SC-B-SERIALIZATION-UTILITIES-SEED-OPAQUE-PAYLOADTYPE-001 added
+WireEnvelopeValidatorTest.acceptsUnknownButSyntacticallyValidPayloadType with no scope expansion.
 ```
 
 ---
@@ -83,9 +86,9 @@ Results:
 ```text
 compile: PASS
 codec/registry subset: PASS - 17 tests, 0 failures, 0 errors, 0 skipped
-wire/architecture subset: PASS - 15 tests, 0 failures, 0 errors, 0 skipped
+wire/architecture subset: PASS - 16 tests, 0 failures, 0 errors, 0 skipped
 hardening architecture subset: PASS
-full sovereign-connect: PASS - 410 tests, 0 failures, 0 errors, 0 skipped
+full sovereign-connect: PASS - 411 tests, 0 failures, 0 errors, 0 skipped
 forbidden production serialization/package dependency grep: PASS - no matches
 ```
 
@@ -98,8 +101,8 @@ AC-028-001..AC-028-044: PASS
 
 Evidence:
   - Required production classes exist in com.sovereign.connect.bus.runtime.serialization.
-  - Required test classes exist with the expected 32 MU-028 tests.
-  - Full regression passes with 410 tests and no failures, errors, or skipped tests.
+  - Required test classes exist with the expected 33 MU-028 tests after the opaque payloadType patch.
+  - Full regression passes with 411 tests and no failures, errors, or skipped tests.
   - Architecture tests verify serialization package independence from core, adapter, NATS, and Testcontainers imports.
 ```
 

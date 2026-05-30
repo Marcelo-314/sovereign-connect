@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class WireEnvelopeValidatorTest {
@@ -51,6 +52,16 @@ class WireEnvelopeValidatorTest {
     }
 
     @Test
+    void acceptsUnknownButSyntacticallyValidPayloadType() {
+        // "sc.command.future.v1" is not in ScPayloadTypeRegistry seed constants
+        // but satisfies the grammar sc.<domain>.<type>.v<major>.
+        var envelope = buildValidCommandEnvelope("sc.command.future.v1");
+
+        assertThatNoException()
+                .isThrownBy(() -> WireEnvelopeValidator.validate(envelope));
+    }
+
+    @Test
     void rejectsJavaClassNamePayloadType() {
         assertThatThrownBy(() -> WireEnvelopeValidator.validate(envelope(
                 ScWireEnvelopeKind.COMMAND, "com.sovereign.connect.Command", "1", routing(ScBusLane.COMMAND), null)))
@@ -73,6 +84,10 @@ class WireEnvelopeValidatorTest {
                 responseMetadata,
                 new ObjectMapper().createObjectNode().put("ok", true)
         );
+    }
+
+    private ScJsonWireEnvelope buildValidCommandEnvelope(String payloadType) {
+        return envelope(ScWireEnvelopeKind.COMMAND, payloadType, "1", routing(ScBusLane.COMMAND), null);
     }
 
     private ScMessageMetadata metadata() {
