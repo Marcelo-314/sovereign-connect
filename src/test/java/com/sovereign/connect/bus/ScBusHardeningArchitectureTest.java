@@ -69,13 +69,20 @@ class ScBusHardeningArchitectureTest {
 
     @Test
     void scBMigrationCreatesOnlyScBTables() throws Exception {
-        Path migration = Path.of("src/main/resources/db/migration/V100__sc_b_dispatch_state_persistence.sql");
-        String sql = Files.readString(migration).toLowerCase(Locale.ROOT);
-        Matcher matcher = Pattern.compile("create\\s+table(?:\\s+if\\s+not\\s+exists)?\\s+([a-z0-9_]+)").matcher(sql);
-        while (matcher.find()) {
-            assertThat(matcher.group(1)).startsWith("sc_b_");
+        try (Stream<Path> paths = Files.walk(Path.of("src/main/resources/db/migration"))) {
+            List<Path> migrations = paths
+                    .filter(path -> path.getFileName().toString().contains("sc_b"))
+                    .toList();
+            for (Path migration : migrations) {
+                String sql = Files.readString(migration).toLowerCase(Locale.ROOT);
+                Matcher matcher = Pattern.compile("create\\s+table(?:\\s+if\\s+not\\s+exists)?\\s+([a-z0-9_]+)").matcher(sql);
+                while (matcher.find()) {
+                    assertThat(matcher.group(1)).startsWith("sc_b_");
+                }
+                assertThat(sql).doesNotContain("alter table sc_c");
+                assertThat(sql).doesNotContain("sc_c_outbox_entries");
+            }
         }
-        assertThat(sql).doesNotContain("alter table sc_c");
     }
 
     @Test
