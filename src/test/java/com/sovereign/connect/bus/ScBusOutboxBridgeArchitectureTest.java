@@ -78,24 +78,27 @@ class ScBusOutboxBridgeArchitectureTest {
     }
 
     @Test
-    void dispatchObservationPersistenceStillDeferred() throws Exception {
-        try (Stream<Path> paths = Files.walk(Path.of("src/main/java"))) {
-            assertThat(paths
-                    .filter(path -> path.getFileName().toString().contains("DispatchObservation"))
-                    .map(Path::toString)
-                    .filter(path -> path.contains("persistence"))
-                    .toList()).isEmpty();
-        }
+    void dispatchObservationPersistenceStaysInBusRuntimePersistence() throws Exception {
+        Path repository = Path.of("src/main/java/com/sovereign/connect/bus/runtime/persistence/JdbcDispatchObservationRepository.java");
+        assertThat(repository).exists();
+        String source = Files.readString(repository);
+        assertThat(source).doesNotContain("import com.sovereign.connect.core.");
+        assertThat(source).doesNotContain("import com.sovereign.connect.integration.");
+        assertThat(source).doesNotContain("import com.sovereign.connect." + "adapter.");
     }
 
     @Test
-    void h2DoesNotAddScBMigrations() throws Exception {
+    void scBMigrationsContainExpectedHardeningFiles() throws Exception {
         try (Stream<Path> paths = Files.walk(Path.of("src/main/resources/db/migration"))) {
             List<String> scBMigrations = paths
                     .filter(path -> path.getFileName().toString().contains("sc_b"))
                     .map(path -> path.getFileName().toString())
+                    .sorted()
                     .toList();
-            assertThat(scBMigrations).containsExactly("V100__sc_b_dispatch_state_persistence.sql");
+            assertThat(scBMigrations).containsExactlyInAnyOrder(
+                    "V100__sc_b_dispatch_state_persistence.sql",
+                    "V101__sc_b_dispatch_observation_persistence.sql"
+            );
         }
     }
 
