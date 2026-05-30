@@ -15,7 +15,7 @@ MU Slot:      MU-027
 ```text
 Branch: feat/sc-b-mir-027-dispatch-observation-persistence
 Implementation commit: f9a9c641bff2e564bfc010668da69e2b709d1bdf
-Evidence/docs commit: pending
+Evidence/docs commit: 00acf1e
 Executor: Codex
 Final pushed state: pending PR push
 ```
