@@ -19,7 +19,7 @@ feat/sc-b-mir-028-serialization-utilities-seed
 ## Commits
 
 ```text
-TBD fix(sc-b): cover opaque payload type validation
+5283b104634acc7b4dde75daae0386408cf6880d fix(sc-b): cover opaque payload type validation
 ```
 
 ## Changed files
