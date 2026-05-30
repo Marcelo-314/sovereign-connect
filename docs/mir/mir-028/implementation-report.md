@@ -16,7 +16,7 @@ MU Slot:      MU-028
 
 ```text
 Branch: feat/sc-b-mir-028-serialization-utilities-seed
-Implementation commit: TBD
+Implementation commit: 27951ce21cadd30fdff5bcde3b179d26c6290b44
 Evidence/docs commit: TBD
 Changed files:
   - docs/mir/mir-028/*
