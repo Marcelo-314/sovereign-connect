@@ -16,7 +16,7 @@ Target MIR:   MIR-SOV-SC-B-NATS-JETSTREAM-BINDING-SEED-001 v0.2.0-candidate
 Branch: feat/sc-b-mir-029-nats-jetstream-binding-seed
 Base branch / base commit: develop / c8d50d0
 Primary implementation commit: d616cf9129c9fdc21bd0b7d9239b267c79933446
-Documentation/evidence commit: TBD
+Documentation/evidence commit: c175a0a8ef4d9e24a784df1a274da2a09936f09c
 Execution date: 2026-05-30
 Executor: Codex
 Verdict: Validated L4
