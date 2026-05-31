@@ -17,7 +17,7 @@ class NorthboundFacadeNegativeBoundaryTest {
         List<String> webTokens = List.of(
             "@RestController", "@Controller",
             "@MessageMapping", "org.springframework.web",
-            "graphql", "io.grpc", "connectrpc", "io.nats", "JetStream"
+            "graphql", "io.grpc", "connectrpc", "JetStream"
         );
         List<String> allowedPaths = List.of("adapter/northbound/http");
         try (Stream<Path> paths = Files.walk(Path.of("src/main/java/com/sovereign/connect"))) {

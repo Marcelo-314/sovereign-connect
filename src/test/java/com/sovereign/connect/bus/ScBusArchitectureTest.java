@@ -33,25 +33,26 @@ class ScBusArchitectureTest {
     void busDoesNotImportPhysicalBrokerRuntimeApis() throws Exception {
         Path root = Path.of("src/main/java/com/sovereign/connect/bus");
         assertNoSourceContains(root, List.of(
-                "import io.nats.", "import io.vertx.", "import io.grpc.", "import redis.clients.",
+                "import io.vertx.", "import io.grpc.", "import redis.clients.",
                 "import io.lettuce.", "import org.apache.kafka.", "import com.rabbitmq.",
                 "import org.eclipse.paho.", "import jakarta.websocket.", "import javax.websocket."
         ));
     }
 
     @Test
-    void productionHasNoScdCommandClass() throws Exception {
-        try (Stream<Path> paths = Files.walk(Path.of("src/main/java"))) {
-            assertThat(paths.filter(path -> path.getFileName().toString().equals("ScdCommand.java")).toList()).isEmpty();
-        }
+    void productionScdCommandReferenceRecordLivesUnderBusContract() {
+        assertThat(Path.of("src/main/java/com/sovereign/connect/bus/contract/scd/ScdCommand.java")).exists();
     }
 
     @Test
-    void pomsDoNotIntroducePhysicalBusBindingDependency() throws Exception {
-        List<String> forbidden = List.of("io.nats", "jetstream", "lettuce", "vertx", "grpc-netty", "kafka-clients", "amqp-client", "mqtt");
+    void pomsAllowOnlyIntentionalNatsBindingDependency() throws Exception {
+        List<String> forbidden = List.of("jetstream", "lettuce", "vertx", "grpc-netty", "kafka-clients", "amqp-client", "mqtt");
         for (Path pom : List.of(Path.of("pom.xml"), Path.of("eib/pom.xml"))) {
             if (Files.exists(pom)) {
                 String xml = Files.readString(pom).toLowerCase(Locale.ROOT);
+                if (pom.equals(Path.of("pom.xml"))) {
+                    assertThat(xml).contains("io.nats");
+                }
                 assertThat(forbidden).noneMatch(xml::contains);
             }
         }

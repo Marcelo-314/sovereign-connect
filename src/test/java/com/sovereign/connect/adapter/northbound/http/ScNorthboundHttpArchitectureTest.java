@@ -40,7 +40,7 @@ class ScNorthboundHttpArchitectureTest {
     void forbiddenTechnologiesAbsentFromAllMainSource() throws IOException {
         List<String> forbidden = List.of(
             "@MessageMapping", "graphql", "io.grpc", "connectrpc",
-            "io.nats", "JetStream", "SseEmitter", "Flux<", "Mono<",
+            "JetStream", "SseEmitter", "Flux<", "Mono<",
             "spring-boot-starter-webflux"
         );
         try (Stream<Path> paths = Files.walk(allMain)) {
