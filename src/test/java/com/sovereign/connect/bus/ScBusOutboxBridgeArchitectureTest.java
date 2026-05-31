@@ -57,24 +57,25 @@ class ScBusOutboxBridgeArchitectureTest {
 
     @Test
     void noBrokerDependencyIntroduced() throws Exception {
-        List<String> forbidden = List.of("io.nats", "jetstream", "lettuce", "vertx", "grpc-netty", "kafka-clients", "amqp-client", "mqtt");
+        List<String> forbidden = List.of("jetstream", "lettuce", "vertx", "grpc-netty", "kafka-clients", "amqp-client", "mqtt");
         for (Path pom : List.of(Path.of("pom.xml"), Path.of("eib/pom.xml"))) {
             if (Files.exists(pom)) {
                 String xml = Files.readString(pom).toLowerCase(Locale.ROOT);
+                if (pom.equals(Path.of("pom.xml"))) {
+                    assertThat(xml).contains("io.nats");
+                }
                 assertThat(forbidden).noneMatch(xml::contains);
             }
         }
         assertNoSourceContains(
                 Path.of("src/main/java"),
-                List.of("import io.nats.", "import org.apache.kafka.", "import com.rabbitmq.", "import org.eclipse.paho.")
+                List.of("import org.apache.kafka.", "import com.rabbitmq.", "import org.eclipse.paho.")
         );
     }
 
     @Test
-    void noProductionScdCommandIntroduced() throws Exception {
-        try (Stream<Path> paths = Files.walk(Path.of("src/main/java"))) {
-            assertThat(paths.filter(path -> path.getFileName().toString().equals("ScdCommand.java")).toList()).isEmpty();
-        }
+    void productionScdCommandReferenceRecordLivesUnderBusContract() {
+        assertThat(Path.of("src/main/java/com/sovereign/connect/bus/contract/scd/ScdCommand.java")).exists();
     }
 
     @Test

@@ -34,7 +34,7 @@ class ScBusHardeningArchitectureTest {
         assertNoSourceContains(
                 Path.of("src/main/java/com/sovereign/connect/bus"),
                 List.of(
-                        "import io.nats.", "import io.vertx.", "import io.grpc.", "import redis.clients.",
+                        "import io.vertx.", "import io.grpc.", "import redis.clients.",
                         "import io.lettuce.", "import org.apache.kafka.", "import com.rabbitmq.",
                         "import org.eclipse.paho.", "import jakarta.websocket.", "import javax.websocket."
                 )
@@ -43,10 +43,13 @@ class ScBusHardeningArchitectureTest {
 
     @Test
     void pomsDoNotIntroducePhysicalBusBindingDependencies() throws Exception {
-        List<String> forbidden = List.of("io.nats", "jetstream", "lettuce", "vertx", "grpc-netty", "kafka-clients", "amqp-client", "mqtt");
+        List<String> forbidden = List.of("jetstream", "lettuce", "vertx", "grpc-netty", "kafka-clients", "amqp-client", "mqtt");
         for (Path pom : List.of(Path.of("pom.xml"), Path.of("eib/pom.xml"))) {
             if (Files.exists(pom)) {
                 String xml = Files.readString(pom).toLowerCase(Locale.ROOT);
+                if (pom.equals(Path.of("pom.xml"))) {
+                    assertThat(xml).contains("io.nats");
+                }
                 assertThat(forbidden).noneMatch(xml::contains);
             }
         }

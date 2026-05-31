@@ -8,6 +8,9 @@ public final class ScPayloadTypeRegistry {
     public static final String EVENT_TIMER_FIRED_V1          = "sc.event.timer-fired.v1";
     public static final String RESPONSE_STUB_V1              = "sc.response.stub.v1";
     public static final String LIFECYCLE_ADAPTER_ANNOUNCE_V1 = "sc.lifecycle.adapter-announce.v1";
+    public static final String COMMAND_SCD_V1                = "sc.command.scd.v1";
+    public static final String RESPONSE_SCD_EXECUTION_RESULT_V1 =
+        "sc.response.scd-execution-result.v1";
 
     private static final Pattern PAYLOAD_TYPE_PATTERN =
         Pattern.compile("^sc\\.[a-z0-9-]+\\.[a-z0-9-]+\\.v[1-9][0-9]*$");

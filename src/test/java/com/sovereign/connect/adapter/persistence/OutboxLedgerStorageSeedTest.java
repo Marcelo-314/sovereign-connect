@@ -298,7 +298,6 @@ class OutboxLedgerStorageSeedTest {
             "markDispatched",
             "retryLoop",
             "org.nats",
-            "io.nats",
             "JetStream",
             "sc_c_delivery_observations",
             "sc_c_terminal_responses",

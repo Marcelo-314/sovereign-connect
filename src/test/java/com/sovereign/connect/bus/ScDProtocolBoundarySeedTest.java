@@ -16,13 +16,12 @@ class ScDProtocolBoundarySeedTest {
     }
 
     @Test
-    void productionDoesNotIntroduceScdCommandOrDiscoveryFactShapes() throws Exception {
+    void productionOnlyIntroducesScdCommandAsBusContractReferenceBinding() throws Exception {
         Path mainJava = Path.of("src/main/java");
         try (Stream<Path> paths = Files.walk(mainJava)) {
             assertThat(paths.filter(path -> path.toString().endsWith(".java"))
                     .map(path -> mainJava.relativize(path).toString())
-                    .filter(path -> path.endsWith("ScdCommand.java")
-                            || path.endsWith("DeviceDiscoveredFact.java")
+                    .filter(path -> path.endsWith("DeviceDiscoveredFact.java")
                             || path.endsWith("EndpointDiscoveredFact.java")
                             || path.endsWith("DeviceStateObservedFact.java")
                             || path.endsWith("EndpointStateObservedFact.java")
@@ -30,5 +29,6 @@ class ScDProtocolBoundarySeedTest {
                             || path.endsWith("EndpointHealthObservedFact.java"))
                     .toList()).isEmpty();
         }
+        assertThat(Path.of("src/main/java/com/sovereign/connect/bus/contract/scd/ScdCommand.java")).exists();
     }
 }
