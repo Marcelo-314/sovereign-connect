@@ -15,8 +15,6 @@ import io.nats.client.JetStream;
 import io.nats.client.JetStreamManagement;
 import io.nats.client.JetStreamSubscription;
 import io.nats.client.Message;
-import io.nats.client.Nats;
-import io.nats.client.Options;
 import io.nats.client.PullSubscribeOptions;
 import org.junit.jupiter.api.Test;
 
@@ -122,12 +120,7 @@ class NatsScBusPortReconnectTest {
     }
 
     private Connection buildReconnectAwareConnection(String natsUri) throws Exception {
-        Options opts = new Options.Builder()
-                .server(natsUri)
-                .maxReconnects(-1)
-                .reconnectWait(Duration.ofMillis(200))
-                .build();
-        return Nats.connect(opts);
+        return new NatsConnectionFactory().create(natsUri);
     }
 
     private NatsScBusPort buildPort(Connection conn) {
