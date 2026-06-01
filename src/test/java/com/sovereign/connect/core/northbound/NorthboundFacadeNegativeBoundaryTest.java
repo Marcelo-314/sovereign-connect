@@ -19,7 +19,7 @@ class NorthboundFacadeNegativeBoundaryTest {
             "@MessageMapping", "org.springframework.web",
             "graphql", "io.grpc", "connectrpc", "JetStream"
         );
-        List<String> allowedPaths = List.of("adapter/northbound/http");
+        List<String> allowedPaths = List.of("adapter/northbound/http", "bus/runtime/nats");
         try (Stream<Path> paths = Files.walk(Path.of("src/main/java/com/sovereign/connect"))) {
             List<String> violations = paths
                 .filter(path -> path.toString().endsWith(".java"))

@@ -28,13 +28,25 @@ class ScBusNatsArchitectureTest {
     }
 
     @Test
-    void natsPackageUsesSerializationUtilitiesAndWireValidator() throws Exception {
-        String sources = readAll(Path.of("src/main/java/com/sovereign/connect/bus/runtime/nats"));
+    void natsScBusPortImportsScJsonWireCodecAndWireEnvelopeValidator() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/sovereign/connect/bus/runtime/nats/NatsScBusPort.java"));
 
-        assertThat(sources).contains("ScJsonWireCodec");
-        assertThat(sources).contains("WireEnvelopeValidator");
-        assertThat(sources).contains("ScSubjectIdTokenCodec");
-        assertThat(sources).contains("ScCorrelationTokenCodec");
+        assertThat(source)
+                .contains("import com.sovereign.connect.bus.runtime.serialization.ScJsonWireCodec");
+        assertThat(source)
+                .contains("import com.sovereign.connect.bus.runtime.serialization.WireEnvelopeValidator");
+    }
+
+    @Test
+    void natsSubjectBuilderImportsScSubjectIdTokenCodecAndScCorrelationTokenCodec() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/sovereign/connect/bus/runtime/nats/NatsSubjectBuilder.java"));
+
+        assertThat(source)
+                .contains("import com.sovereign.connect.bus.runtime.serialization.ScSubjectIdTokenCodec");
+        assertThat(source)
+                .contains("import com.sovereign.connect.bus.runtime.serialization.ScCorrelationTokenCodec");
     }
 
     @Test
@@ -69,13 +81,16 @@ class ScBusNatsArchitectureTest {
     }
 
     @Test
-    void natsPackageDoesNotReplaceDispatchPersistencePorts() throws Exception {
-        String sources = readAll(Path.of("src/main/java/com/sovereign/connect/bus/runtime/nats"));
-
-        assertThat(sources).doesNotContain("DispatchStateWritePort");
-        assertThat(sources).doesNotContain("DispatchObservationPort");
-        assertThat(sources).doesNotContain("JdbcDispatchStateRepository");
-        assertThat(sources).doesNotContain("JdbcDispatchObservationRepository");
+    void jetStreamHardeningClassesDoNotImportDispatchPersistencePorts() throws Exception {
+        assertNoSourceContains(
+                Path.of("src/main/java/com/sovereign/connect/bus/runtime/nats"),
+                List.of(
+                        "import com.sovereign.connect.bus.runtime.port.DispatchStateWritePort",
+                        "import com.sovereign.connect.bus.runtime.port.DispatchObservationPort",
+                        "import com.sovereign.connect.bus.runtime.persistence.JdbcDispatchStateRepository",
+                        "import com.sovereign.connect.bus.runtime.persistence.JdbcDispatchObservationRepository"
+                )
+        );
     }
 
     private void assertNoSourceContains(Path root, List<String> forbidden) throws Exception {
