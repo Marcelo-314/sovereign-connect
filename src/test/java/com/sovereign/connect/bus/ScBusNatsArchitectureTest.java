@@ -33,6 +33,16 @@ class ScBusNatsArchitectureTest {
     }
 
     @Test
+    void natsConnectionFactoryDoesNotImportCoreAdapterOrIntegration() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/sovereign/connect/bus/runtime/nats/NatsConnectionFactory.java"));
+
+        assertThat(source).doesNotContain("import com.sovereign.connect.core.");
+        assertThat(source).doesNotContain("import com.sovereign.connect." + "adapter.");
+        assertThat(source).doesNotContain("import com.sovereign.connect.integration.");
+    }
+
+    @Test
     void natsScBusPortImportsScJsonWireCodecAndWireEnvelopeValidator() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/com/sovereign/connect/bus/runtime/nats/NatsScBusPort.java"));

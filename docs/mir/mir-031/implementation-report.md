@@ -97,3 +97,60 @@ JetStream conflict behavior:
 One targeted run initially hit a local NatsLocalServer startup connection error in a single drain test.
 The same test passed when rerun individually, and the full targeted command passed afterwards.
 ```
+
+## Patch: PATCH-SOV-SC-B-NATS-CONNECTION-FACTORY-001
+
+```text
+Status: Implemented
+Commit: refactor(sc-b): centralize nats connection creation
+
+Files added:
+  - src/main/java/com/sovereign/connect/bus/runtime/nats/NatsConnectionFactory.java
+  - src/test/java/com/sovereign/connect/bus/runtime/nats/NatsConnectionFactoryTest.java
+
+Files modified:
+  - src/test/java/com/sovereign/connect/bus/runtime/nats/NatsScBusPortReconnectTest.java
+  - src/test/java/com/sovereign/connect/bus/ScBusNatsArchitectureTest.java
+
+Listener ownership:
+  NatsScBusPort listener ownership remains internal.
+  NatsConnectionFactory centralizes Options construction and Nats.connect(...) creation.
+  The factory also supports optional ConnectionListener wiring at connection creation time.
+
+Scope confirmation:
+  Adapter Manifest runtime introduced: no
+  Manifest-over-NATS transport introduced: no
+  Route assignment runtime introduced: no
+  Command/response handler runtime introduced: no
+  Provider execution introduced: no
+  Command admission runtime introduced: no
+  SC-C direct NATS import introduced: no
+  Flyway migration introduced: no
+
+Verification:
+  Targeted:
+    mvn -q test -Dtest="NatsConnectionFactoryTest,NatsScBusPortReconnectTest,ScBusNatsArchitectureTest,NatsScBusPortDrainTest,NatsJetStreamStreamApplicatorTest"
+    Result: pass
+
+  Full:
+    mvn -q test
+    sovereign-connect: 484 tests, 0 failures, 0 errors, 0 skipped
+    EIB: not applicable in this repository
+
+Acceptance:
+  AC-PATCH-001: PASS
+  AC-PATCH-002: PASS
+  AC-PATCH-003: PASS
+  AC-PATCH-004: PASS
+  AC-PATCH-005: PASS
+  AC-PATCH-006: PASS
+  AC-PATCH-007: PASS
+  AC-PATCH-008: PASS
+  AC-PATCH-009: PASS
+  AC-PATCH-010: PASS
+
+Notes:
+  The first full mvn -q test run exposed a test-source architecture violation because the new
+  assertion contained the forbidden adapter import string literally. The assertion was changed
+  to match the existing concatenated-string pattern, and the subsequent full suite passed.
+```
