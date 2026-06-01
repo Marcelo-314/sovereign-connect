@@ -36,9 +36,26 @@ public final class NatsJetStreamStreamApplicator {
                 .build();
         try {
             return management.addStream(config);
-        } catch (JetStreamApiException alreadyExistsOrConflict) {
+        } catch (JetStreamApiException apiEx) {
+            if (apiEx.getApiErrorCode() != 10058) {
+                throw new IllegalStateException(
+                        "JetStream stream application failed with unexpected API error: " + definition.name(),
+                        apiEx);
+            }
             try {
+                StreamInfo existing = management.getStreamInfo(definition.name());
+                if (existing.getConfiguration().getStorageType() != config.getStorageType()) {
+                    throw new IllegalStateException(
+                            "JetStream stream is incompatible or cannot be updated: "
+                                    + definition.name()
+                                    + " - existing storageType: "
+                                    + existing.getConfiguration().getStorageType()
+                                    + ", canonical: "
+                                    + config.getStorageType());
+                }
                 return management.updateStream(config);
+            } catch (IllegalStateException ex) {
+                throw ex;
             } catch (IOException | JetStreamApiException updateFailed) {
                 throw new IllegalStateException(
                         "JetStream stream is incompatible or cannot be updated: " + definition.name(),

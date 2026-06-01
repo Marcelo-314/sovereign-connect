@@ -1,6 +1,8 @@
 package com.sovereign.connect.bus.runtime.nats;
 
 import io.nats.client.JetStreamManagement;
+import io.nats.client.api.StorageType;
+import io.nats.client.api.StreamConfiguration;
 import io.nats.client.api.StreamInfo;
 import org.junit.jupiter.api.Test;
 
@@ -9,6 +11,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NatsJetStreamStreamApplicatorTest {
     @Test
@@ -74,5 +77,28 @@ class NatsJetStreamStreamApplicatorTest {
                         List.of("sc.v1.*.response.>"),
                         List.of("sc.v1.*.lifecycle.>"),
                         List.of("sc.v1.*.dlq.>"));
+    }
+
+    @Test
+    void incompatibleStorageTypeConflictThrowsIllegalStateException() throws Exception {
+        try (NatsLocalServer server = NatsLocalServer.start(Path.of("target/nats-server-cache"))) {
+            JetStreamManagement jsm = server.connection().jetStreamManagement();
+            StreamConfiguration incompatible = StreamConfiguration.builder()
+                    .name(NatsStreamConfiguration.SCB_LIFECYCLE_V1)
+                    .subjects("sc.v1.*.lifecycle.>")
+                    .storageType(StorageType.File)
+                    .build();
+            jsm.addStream(incompatible);
+
+            NatsStreamConfiguration.StreamDefinition lifecycleDef =
+                    NatsStreamConfiguration.streamDefinitions().stream()
+                            .filter(definition -> definition.name().equals(NatsStreamConfiguration.SCB_LIFECYCLE_V1))
+                            .findFirst()
+                            .orElseThrow();
+
+            assertThatThrownBy(() -> new NatsJetStreamStreamApplicator(jsm).ensureStream(lifecycleDef))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining(NatsStreamConfiguration.SCB_LIFECYCLE_V1);
+        }
     }
 }
