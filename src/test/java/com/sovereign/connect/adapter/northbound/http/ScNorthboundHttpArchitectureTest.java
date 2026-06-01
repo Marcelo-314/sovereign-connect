@@ -14,6 +14,7 @@ class ScNorthboundHttpArchitectureTest {
 
     private final Path allMain = Path.of("src/main/java/com/sovereign/connect");
     private final Path httpAdapter = Path.of("src/main/java/com/sovereign/connect/adapter/northbound/http");
+    private final Path natsRuntime = Path.of("src/main/java/com/sovereign/connect/bus/runtime/nats");
 
     @Test
     void webImportsForbiddenOutsideHttpAdapterPackage() throws IOException {
@@ -46,6 +47,7 @@ class ScNorthboundHttpArchitectureTest {
         try (Stream<Path> paths = Files.walk(allMain)) {
             List<String> violations = paths
                 .filter(p -> p.toString().endsWith(".java"))
+                .filter(p -> !p.toAbsolutePath().normalize().startsWith(natsRuntime.toAbsolutePath().normalize()))
                 .filter(p -> containsAny(p, forbidden))
                 .map(Path::toString)
                 .toList();

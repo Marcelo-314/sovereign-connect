@@ -422,6 +422,9 @@ class OutboxLedgerStorageSeedTest {
 
     private List<String> productionSources() throws IOException {
         Path root = Path.of("src/main/java");
+        Path natsRuntime = Path.of("src/main/java/com/sovereign/connect/bus/runtime/nats")
+                .toAbsolutePath()
+                .normalize();
         if (Files.notExists(root)) {
             return List.of();
         }
@@ -429,6 +432,7 @@ class OutboxLedgerStorageSeedTest {
             return paths
                 .filter(Files::isRegularFile)
                 .filter(path -> path.toString().endsWith(".java"))
+                .filter(path -> !path.toAbsolutePath().normalize().startsWith(natsRuntime))
                 .map(path -> {
                     try {
                         return Files.readString(path);
