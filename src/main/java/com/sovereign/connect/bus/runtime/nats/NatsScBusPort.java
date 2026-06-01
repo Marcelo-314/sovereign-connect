@@ -18,6 +18,7 @@ import com.sovereign.connect.bus.runtime.serialization.ScPayloadTypeRegistry;
 import com.sovereign.connect.bus.runtime.serialization.WireEnvelopeValidator;
 import com.sovereign.connect.bus.runtime.validation.EnvelopeValidationService;
 import io.nats.client.Connection;
+import io.nats.client.ConnectionListener;
 import io.nats.client.Dispatcher;
 
 import java.time.Duration;
@@ -25,8 +26,10 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
-public final class NatsScBusPort implements ScBusPort {
+public final class NatsScBusPort implements ScBusPort, AutoCloseable {
     private static final String SCHEMA_VERSION = "1.0";
     private static final String TIMER_FIRED_TOPIC = "sc-c.timer-fired";
 
@@ -35,6 +38,9 @@ public final class NatsScBusPort implements ScBusPort {
     private final ScJsonWireCodec wireCodec;
     private final EnvelopeValidationService envelopeValidationService;
     private final CopyOnWriteArrayList<Dispatcher> dispatchers = new CopyOnWriteArrayList<>();
+    private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final AtomicInteger reconnectEvents = new AtomicInteger(0);
+    private final AtomicInteger resubscribedEvents = new AtomicInteger(0);
 
     public NatsScBusPort(
             Connection connection,
@@ -47,6 +53,16 @@ public final class NatsScBusPort implements ScBusPort {
         this.wireCodec = Objects.requireNonNull(wireCodec, "wireCodec is required");
         this.envelopeValidationService = Objects.requireNonNull(envelopeValidationService,
                 "envelopeValidationService is required");
+        connection.addConnectionListener(new ConnectionListener() {
+            @Override
+            public void connectionEvent(Connection conn, Events type) {
+                switch (type) {
+                    case RECONNECTED -> reconnectEvents.incrementAndGet();
+                    case RESUBSCRIBED -> resubscribedEvents.incrementAndGet();
+                    default -> { }
+                }
+            }
+        });
     }
 
     @Override
@@ -54,6 +70,7 @@ public final class NatsScBusPort implements ScBusPort {
         UUID dispatchRecordId = UUID.randomUUID();
         UUID attemptId = UUID.randomUUID();
         try {
+            requireOpen();
             envelopeValidationService.validateCommand(envelope);
             if (!(envelope.payload() instanceof ScdCommand)) {
                 return unsupportedPayloadType(dispatchRecordId, attemptId);
@@ -75,6 +92,7 @@ public final class NatsScBusPort implements ScBusPort {
         UUID dispatchRecordId = UUID.randomUUID();
         UUID attemptId = UUID.randomUUID();
         try {
+            requireOpen();
             envelopeValidationService.validateEvent(envelope);
             if (!TIMER_FIRED_TOPIC.equals(envelope.routingKey().topic())) {
                 return unsupportedPayloadType(dispatchRecordId, attemptId);
@@ -96,6 +114,7 @@ public final class NatsScBusPort implements ScBusPort {
         UUID dispatchRecordId = UUID.randomUUID();
         UUID attemptId = UUID.randomUUID();
         try {
+            requireOpen();
             envelopeValidationService.validateResponse(envelope);
             if (!(envelope.payload() instanceof ScdExecutionResult)) {
                 return unsupportedPayloadType(dispatchRecordId, attemptId);
@@ -114,12 +133,14 @@ public final class NatsScBusPort implements ScBusPort {
 
     @Override
     public void registerCommandHandler(String topicOrRoute, ScCommandHandler handler) {
+        requireOpen();
         requireTopic(topicOrRoute);
         Objects.requireNonNull(handler, "handler is required");
     }
 
     @Override
     public void registerEventHandler(String topicOrRoute, ScEventHandler handler) {
+        requireOpen();
         String topic = requireTopic(topicOrRoute);
         Objects.requireNonNull(handler, "handler is required");
         if (!TIMER_FIRED_TOPIC.equals(topic)) {
@@ -137,8 +158,43 @@ public final class NatsScBusPort implements ScBusPort {
 
     @Override
     public void registerResponseHandler(String topicOrRoute, ScResponseHandler handler) {
+        requireOpen();
         requireTopic(topicOrRoute);
         Objects.requireNonNull(handler, "handler is required");
+    }
+
+    @Override
+    public void close() {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            for (Dispatcher dispatcher : dispatchers) {
+                try {
+                    connection.closeDispatcher(dispatcher);
+                } catch (RuntimeException ignored) {
+                    // Dispatcher cleanup is best effort; connection drain is the transport boundary.
+                }
+            }
+            dispatchers.clear();
+            Boolean drained = connection.drain(Duration.ofSeconds(10)).get();
+            if (!Boolean.TRUE.equals(drained)) {
+                throw new IllegalStateException("NATS connection drain timed out");
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while draining NATS connection", ex);
+        } catch (Exception ex) {
+            throw new IllegalStateException("failed to drain NATS connection", ex);
+        }
+    }
+
+    int getReconnectEventCount() {
+        return reconnectEvents.get();
+    }
+
+    int getResubscribedEventCount() {
+        return resubscribedEvents.get();
     }
 
     private void publishWire(ScJsonWireEnvelope wire, String subject) {
@@ -217,6 +273,12 @@ public final class NatsScBusPort implements ScBusPort {
             throw new IllegalArgumentException(field + " is required");
         }
         return value;
+    }
+
+    private void requireOpen() {
+        if (closed.get()) {
+            throw new IllegalStateException("NatsScBusPort is closed");
+        }
     }
 
     private void flush() {

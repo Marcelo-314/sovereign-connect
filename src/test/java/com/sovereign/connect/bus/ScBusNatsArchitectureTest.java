@@ -19,6 +19,11 @@ class ScBusNatsArchitectureTest {
     }
 
     @Test
+    void natsScBusPortImplementsAutoCloseable() {
+        assertThat(AutoCloseable.class).isAssignableFrom(NatsScBusPort.class);
+    }
+
+    @Test
     void natsPackageDoesNotImportCoreAdapterOrIntegration() throws Exception {
         assertNoSourceContains(Path.of("src/main/java/com/sovereign/connect/bus/runtime/nats"), List.of(
                 "import com.sovereign.connect.core.",
